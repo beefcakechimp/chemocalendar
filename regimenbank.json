@@ -1,0 +1,24 @@
+{
+  "regimens": {
+    "7-3": {
+      "chemotherapy": [
+        {
+          "dose": "100–200 mg/m²",
+          "duration": "7 Days",
+          "frequency": "Continuous Infusion",
+          "name": "Cytarabine",
+          "route": "IV"
+        },
+        {
+          "dose": "60 mg/m²",
+          "duration": "3 Days",
+          "frequency": "Daily",
+          "name": "Daunorubicin",
+          "route": "IV"
+        }
+      ],
+      "disease_state": null,
+      "name": "7-3 Induction"
+    }
+  }
+}
