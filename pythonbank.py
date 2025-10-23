@@ -95,22 +95,43 @@ class RegimenBank:
         self._load()
 
     def _load(self) -> None:
+    # Start with a safe default structure
+        self.data = {"_meta": {"version": SCHEMA_VERSION, "updated_at": None}, "regimens": {}}
         if self.db_path.exists():
-            with self.db_path.open("r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if not isinstance(raw, dict) or "regimens" not in raw:
-                raise SystemExit(f"Invalid regimenbank structure in {self.db_path}.")
-            self.data = raw
+            try:
+                with self.db_path.open("r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    # Merge defensively
+                    if "_meta" not in raw or not isinstance(raw["_meta"], dict):
+                        raw["_meta"] = {"version": SCHEMA_VERSION, "updated_at": None}
+                    if "regimens" not in raw or not isinstance(raw["regimens"], dict):
+                        raw["regimens"] = {}
+                    self.data = raw
+                else:
+                    # If file content is not a dict, keep defaults
+                    pass
+            except Exception:
+                # If file is corrupt, keep defaults; don't crash the wizard
+                pass
 
     def _save(self) -> None:
-        self.data["_meta"]["version"] = SCHEMA_VERSION
-        self.data["_meta"]["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        tmp_dir = self.db_path.parent if self.db_path.parent.exists() else Path(".")
-        with tempfile.NamedTemporaryFile("w", delete=False, dir=tmp_dir, suffix=".tmp", encoding="utf-8") as tf:
-            json.dump(self.data, tf, indent=2, ensure_ascii=False)
-            tf.flush()
-            tmp_name = tf.name
-        Path(tmp_name).replace(self.db_path)
+            # Ensure keys exist before write (idempotent)
+            if "_meta" not in self.data or not isinstance(self.data["_meta"], dict):
+                self.data["_meta"] = {"version": SCHEMA_VERSION, "updated_at": None}
+            if "regimens" not in self.data or not isinstance(self.data["regimens"], dict):
+                self.data["regimens"] = {}
+
+            self.data["_meta"]["version"] = SCHEMA_VERSION
+            self.data["_meta"]["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+            tmp_dir = self.db_path.parent if self.db_path.parent.exists() else Path(".")
+            with tempfile.NamedTemporaryFile("w", delete=False, dir=tmp_dir, suffix=".tmp", encoding="utf-8") as tf:
+                json.dump(self.data, tf, indent=2, ensure_ascii=False)
+                tf.flush()
+                tmp_name = tf.name
+            Path(tmp_name).replace(self.db_path)
+
 
     # Regimen ops
     def list_regimens(self) -> List[str]:
@@ -217,14 +238,14 @@ def wizard(bank: RegimenBank) -> None:
             aza = Chemotherapy(
                 name="Azacitidine",
                 route="IV",
-                dose=prompt_required("Azacitidine dose (e.g., 75 mg/m^2)"),
+                dose="75 mg/m^2",
                 frequency="Days 1–7",
                 duration="7 days",
             )
             # Venetoclax: dose + duration per instance
             ven_dose = prompt_required("Venetoclax dose (e.g., 70 mg / 100 mg / 400 mg)")
             # Offer common durations like a dropdown
-            common_durs = ["7", "14", "18", "21", "28"]
+            common_durs = ["7", "14", "21", "28"]
             print("\nVenetoclax duration days:")
             for i, d in enumerate(common_durs, 1):
                 print(f"  {i}. {d}")
