@@ -57,10 +57,36 @@
           "duration": "14 days"
         }
       ]
+    },
+    "7+3+quizartinib": {
+      "disease_state": "AML",
+      "therapies": [
+        {
+          "name": "Cytarabine",
+          "route": "IV",
+          "dose": "100 mg/m2",
+          "frequency": "Days 1-7",
+          "duration": "7 days"
+        },
+        {
+          "name": "Daunorubicin",
+          "route": "IV",
+          "dose": "60 mg/m2",
+          "frequency": "Days 1-3",
+          "duration": "3 Days"
+        },
+        {
+          "name": "Quizartinib",
+          "route": "PO",
+          "dose": "17.7 mg",
+          "frequency": "Days 8-21",
+          "duration": "14 days"
+        }
+      ]
     }
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-23T15:40:47Z"
+    "updated_at": "2025-10-23T19:16:14Z"
   }
 }
