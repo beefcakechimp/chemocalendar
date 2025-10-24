@@ -17,8 +17,8 @@
           "route": "IV"
         }
       ],
-      "disease_state": null,
-      "name": "7-3 Induction"
+      "disease_state": "AML",
+      "name": "Cytarabine & Daunorubicin Induction"
     },
     "Aza/ven 70 mg": {
       "disease_state": "AML",
@@ -58,7 +58,7 @@
         }
       ]
     },
-    "7+3+quizartinib": {
+    "Cytarabine & Daunorubicin + Quizartinib": {
       "disease_state": "AML",
       "therapies": [
         {
@@ -83,10 +83,29 @@
           "duration": "14 days"
         }
       ]
+    },
+    "CIRB 25-0908 ASTX727 + Iadademstat": {
+      "disease_state": "MPN",
+      "therapies": [
+        {
+          "name": "ASTX727",
+          "route": "PO",
+          "dose": "35-100 mg",
+          "frequency": "Days 1-5",
+          "duration": "5 Days"
+        },
+        {
+          "name": "Iadademstat",
+          "route": "PO",
+          "dose": "50 mcg",
+          "frequency": "Days 1-5, 8-12, 15-19, 22-26",
+          "duration": "20 Days"
+        }
+      ]
     }
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-23T19:16:14Z"
+    "updated_at": "2025-10-24T18:14:29Z"
   }
 }
