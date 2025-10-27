@@ -117,7 +117,7 @@
           "name": "Dexamethasone",
           "route": "PO",
           "dose": "10 mg/m2",
-          "frequency": "Day 1-7 and Day 15-21",
+          "frequency": "Days 1-7, 15-21",
           "duration": "14 Days"
         },
         {
@@ -135,7 +135,7 @@
           "duration": "4 Doses"
         },
         {
-          "name": "Methotrexate",
+          "name": "IT Methotrexate",
           "route": "IT",
           "dose": "15 mg",
           "frequency": "Days 8, 29",
@@ -146,6 +146,6 @@
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-27T13:14:46Z"
+    "updated_at": "2025-10-27T13:19:20Z"
   }
 }
