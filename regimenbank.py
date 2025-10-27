@@ -3,14 +3,14 @@
 regimenbank.py — JSON-backed regimen bank + calendar (TXT and DOCX export)
 
 What you get
-- Interactive Regimen Wizard (dropdown): create/edit regimens and agents; per-agent durations.
-- Interactive Calendar Wizard (dropdown): pick regimen, enter start date (many formats), cycle length.
-- Exports: prints plain text calendar AND can save a .docx that matches clinic-style week grid.
-- HIPAA-friendly: exported DOCX includes blanks for Patient Name and DOB (fill after generation).
+- Interactive Regimen Wizard: create/edit regimens; per-agent durations.
+- Add agents brand-new OR reuse from existing agents across all regimens.
+- Calendar Wizard: pick regimen, enter start date (supports past Day 1), choose "Cycle # or Induction",
+  pick cycle length, then print/save (TXT) and optionally export DOCX matching clinic style.
+- HIPAA-friendly: DOCX has blanks for Patient Name and DOB.
 
-Notes
-- DOCX export uses python-docx if available. If not installed, you’ll get a friendly prompt to install.
-  In Codespaces:   pip install python-docx
+Requires no external deps unless you export DOCX:
+  pip install python-docx
 """
 
 from __future__ import annotations
@@ -230,6 +230,55 @@ def read_date(prompt: str, default: Optional[dt.date] = None) -> dt.date:
                 continue
         print("Enter date as YYYY-MM-DD, M/D/YY, M/D/YYYY, 'today', or +N (e.g., +7).")
 
+# ---------- Agent Catalog (reuse from existing) ----------
+
+def build_agent_catalog(bank: RegimenBank) -> Dict[str, List[Chemotherapy]]:
+    """
+    Collect all agents across all regimens and bucket them by agent name (case-insensitive).
+    Returns dict: name_key -> list[Chemotherapy variants]
+    """
+    catalog: Dict[str, List[Chemotherapy]] = {}
+    for rname in bank.list_regimens():
+        reg = bank.get_regimen(rname)
+        if not reg:
+            continue
+        for t in reg.therapies:
+            key = t.name.strip().lower()
+            catalog.setdefault(key, [])
+            # Avoid duplicate exact variants
+            if not any((v.route == t.route and v.dose == t.dose and v.frequency == t.frequency and v.duration == t.duration)
+                       for v in catalog[key]):
+                catalog[key].append(t)
+    return catalog
+
+def choose_agent_from_catalog(catalog: Dict[str, List[Chemotherapy]]) -> Optional[Chemotherapy]:
+    """
+    Dropdown to choose agent name, then choose variant if multiple.
+    Returns a cloned Chemotherapy or None if catalog empty.
+    """
+    if not catalog:
+        print("No existing agents saved yet.")
+        return None
+    name_options = sorted(set(k for k in catalog.keys()))
+    display = [n.title() for n in name_options]
+    choice, _ = choose_from("Choose an existing agent to reuse:", display, allow_new=False)
+    key = name_options[display.index(choice)]
+    variants = catalog[key]
+    if len(variants) == 1:
+        v = variants[0]
+        print(f"Selected: {v.name} | {v.route} | {v.dose} | {v.frequency} | {v.duration}")
+        return Chemotherapy(v.name, v.route, v.dose, v.frequency, v.duration)
+    else:
+        for i, v in enumerate(variants, 1):
+            print(f"  {i}. {v.route} | {v.dose} | {v.frequency} | {v.duration}")
+        while True:
+            sel = input("Pick a variant by number: ").strip()
+            if sel.isdigit() and 1 <= int(sel) <= len(variants):
+                v = variants[int(sel) - 1]
+                return Chemotherapy(v.name, v.route, v.dose, v.frequency, v.duration)
+            print("Invalid selection.")
+    return None
+
 # ---------------- Regimen Wizard ----------------
 
 def wizard(bank: RegimenBank) -> None:
@@ -286,10 +335,11 @@ def wizard(bank: RegimenBank) -> None:
 
         print("\nActions:")
         print("  1. Add a new agent")
-        print("  2. Edit an existing agent")
-        print("  3. Remove an agent")
-        print("  4. Save and finish")
-        choice = input("Select action [1-4]: ").strip()
+        print("  2. Add from existing agents")
+        print("  3. Edit an existing agent")
+        print("  4. Remove an agent")
+        print("  5. Save and finish")
+        choice = input("Select action [1-5]: ").strip()
 
         if choice == "1":
             name = prompt_required("Agent name")
@@ -311,6 +361,18 @@ def wizard(bank: RegimenBank) -> None:
             reg.upsert_chemo(Chemotherapy(name, route, dose, freq, dur))
 
         elif choice == "2":
+            catalog = build_agent_catalog(bank)
+            tmpl = choose_agent_from_catalog(catalog)
+            if tmpl:
+                print("\nYou can accept as-is or tweak fields.")
+                name = prompt_required("Agent name", tmpl.name)
+                route = prompt_required("Route", tmpl.route)
+                dose = prompt_required("Dose", tmpl.dose)
+                freq = prompt_required("Frequency", tmpl.frequency)
+                dur  = prompt_required("Duration", tmpl.duration)
+                reg.upsert_chemo(Chemotherapy(name, route, dose, freq, dur))
+
+        elif choice == "3":
             if not reg.therapies:
                 print("No agents to edit."); continue
             idx = input("Enter agent number to edit: ").strip()
@@ -325,7 +387,7 @@ def wizard(bank: RegimenBank) -> None:
             t.duration = prompt_required("Duration", t.duration)
             reg.therapies[i] = t
 
-        elif choice == "3":
+        elif choice == "4":
             if not reg.therapies:
                 print("No agents to remove."); continue
             idx = input("Enter agent number to remove: ").strip()
@@ -335,14 +397,14 @@ def wizard(bank: RegimenBank) -> None:
             else:
                 print("Invalid number.")
 
-        elif choice == "4":
+        elif choice == "5":
             bank.upsert_regimen(reg)
             print(f"\nSaved regimen '{reg.name}'.")
             return
         else:
-            print("Choose 1–4.")
+            print("Choose 1–5.")
 
-# ---------------- Calendar + Export ----------------
+# ---------------- Calendar core ----------------
 
 def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
     """
@@ -364,9 +426,10 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
         for d in agent_days.get(t.name, []):
             day_labels.setdefault(d, []).append(t.name)
 
-    # Sunday of the start week, Saturday of the last needed week
+    # Sunday of the start week (past or future ok)
     first_week_sun = start - dt.timedelta(days=(start.weekday() + 1) % 7)
     last_date_needed = start + dt.timedelta(days=max_day - 1)
+    # Saturday of the last needed week
     last_week_sat = last_date_needed + dt.timedelta(days=(5 - last_date_needed.weekday()) % 7 + 1)
 
     # Build grid
@@ -382,8 +445,7 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
                 entry["labels"] = list(day_labels.get(cday, [])) or ["Rest"]
         week.append(entry)
         if len(week) == 7:
-            grid.append(week)
-            week = []
+            grid.append(week); week = []
         d += dt.timedelta(days=1)
     if week:
         while len(week) < 7:
@@ -392,19 +454,18 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
         grid.append(week)
     return first_week_sun, last_week_sat, max_day, grid
 
-def make_calendar_text(reg: Regimen, start: dt.date, cycle_length: int) -> str:
+def make_calendar_text(reg: Regimen, start: dt.date, cycle_length: int, cycle_label: str) -> str:
     first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
     out = []
     months = calendar.month_name[first_sun.month]
     if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
         months += f" - {calendar.month_name[last_sat.month]}"
     title_year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
-    out.append(f"{reg.name} — Cycle 1")
+    out.append(f"{reg.name} — {cycle_label}")
     out.append(f"{months} {title_year}")
     out.append("Sun       Mon       Tue       Wed       Thu       Fri       Sat")
 
     for week in grid:
-        # build fixed-width block
         col_width = 12
         cell_lines = [ [] for _ in range(7) ]
         max_lines = 0
@@ -424,21 +485,23 @@ def make_calendar_text(reg: Regimen, start: dt.date, cycle_length: int) -> str:
         out.append("")
     return "\n".join(out)
 
-def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_path: Path) -> bool:
+# ---------------- DOCX export (clinic style) ----------------
+
+def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_path: Path, cycle_label: str) -> bool:
     """
-    Exports a clinic-style week-grid calendar to DOCX matching the sample:
+    Clinic-style DOCX:
       - Landscape Letter, 0.5" margins
       - Table with:
-          Row 1: merged title inside table (3 lines)
-          Row 2: merged patient blanks (Name/DOB)
-          Row 3: weekday header (Sun..Sat)
+          Row 1: merged title (3 lines)
+          Row 2: merged Name/DOB
+          Row 3: weekday header
           Rows 4+: weeks grid
     """
     try:
         from docx import Document
         from docx.shared import Pt, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.enum.table import WD_TABLE_ALIGNMENT, WD_TABLE_DIRECTION
+        from docx.enum.table import WD_TABLE_ALIGNMENT
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
     except Exception:
@@ -446,7 +509,6 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
 
     first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
 
-    # Month range like "October - November 2025" or single month
     months = calendar.month_name[first_sun.month]
     if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
         months += f" - {calendar.month_name[last_sat.month]}"
@@ -454,24 +516,17 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
 
     doc = Document()
 
-    # --- Page setup: Landscape Letter, 0.5" margins ---
+    # Page setup
     section = doc.sections[0]
-    section.orientation = 1  # WD_ORIENT.LANDSCAPE, but keep literal to avoid extra import
+    section.orientation = 1  # landscape
     section.page_width, section.page_height = Inches(11), Inches(8.5)
     section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = Inches(0.5)
 
-    # We’ll put the header INSIDE the table (matches your sample)
-
-    # Table rows:
-    # 0: merged title (3 lines)
-    # 1: merged patient blanks (Name/DOB)
-    # 2: weekday header (Sun..Sat)
-    # 3..: weeks grid
+    # Table structure
     table = doc.add_table(rows=len(grid) + 3, cols=7)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = True
 
-    # Helper to merge a row across all 7 columns
     def merge_row_across(row_idx: int):
         row = table.rows[row_idx]
         first_cell = row.cells[0]
@@ -479,27 +534,25 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
             first_cell.merge(row.cells[j])
         return first_cell
 
-    # Row 0: merged title (inside table)
+    # Row 0: title
     cell_title = merge_row_across(0)
     p = cell_title.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run("Chemotherapy Calendar\n")
     r.bold = True; r.font.size = Pt(14)
-
-    r2 = p.add_run(f"{reg.name}  - Cycle 1\n")
+    r2 = p.add_run(f"{reg.name}  - {cycle_label}\n")
     r2.font.size = Pt(12)
-
     r3 = p.add_run(f"{months} {title_year}")
     r3.font.size = Pt(12)
 
-    # Row 1: merged patient blanks
+    # Row 1: Name/DOB blanks
     cell_pid = merge_row_across(1)
-    p = cell_pid.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p = cell_pid.paragraphs[0]
     p.add_run("Patient Name: ").bold = True
     p.add_run("__________________________    ")
     p.add_run("DOB: ").bold = True
     p.add_run("______________")
 
-    # Row 2: weekday header
+    # Row 2: weekday headers
     hdr = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     for i, text in enumerate(hdr):
         cell = table.cell(2, i)
@@ -509,19 +562,15 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
         run.bold = True
         run.font.size = Pt(10)
 
-    # Body rows start at table row index 3
+    # Body rows
     body_row_start = 3
-
-    # Fill week rows
     for w_i, week in enumerate(grid):
         for d_i, cell in enumerate(week):
             c = table.cell(body_row_start + w_i, d_i)
             para = c.paragraphs[0]
-            # Date (bold)
             r1 = para.add_run(f"{calendar.month_abbr[cell['date'].month]} {cell['date'].day}\n")
             r1.bold = True
             r1.font.size = Pt(9)
-            # Cycle day + agents
             if cell["cycle_day"] is not None:
                 r2 = para.add_run(f"Day {cell['cycle_day']}\n")
                 r2.font.size = Pt(9)
@@ -529,15 +578,14 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
                     for lab in cell["labels"]:
                         para.add_run(f"{lab}\n").font.size = Pt(9)
 
-    # (Optional) style tweaks: thin borders on table for printability
-    # python-docx doesn't expose table borders directly; set via XML:
+    # Thin borders for printability
     def set_tbl_borders(tbl):
         tbl_pr = tbl._element.tblPr
         tbl_borders = OxmlElement('w:tblBorders')
         for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
             elem = OxmlElement(f'w:{edge}')
             elem.set(qn('w:val'), 'single')
-            elem.set(qn('w:sz'), '4')      # border size (1/8 pt units)
+            elem.set(qn('w:sz'), '4')
             elem.set(qn('w:space'), '0')
             elem.set(qn('w:color'), 'auto')
             tbl_borders.append(elem)
@@ -545,7 +593,7 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
 
     set_tbl_borders(table)
 
-    # Small note to remind about PHI entry after generation
+    # Footer note
     doc.add_paragraph()
     note = doc.add_paragraph()
     note_run = note.add_run("Note: Add patient identifiers (Name/DOB) after generating this document.")
@@ -555,6 +603,28 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
     doc.save(out_path)
     return True
 
+# ---------------- Calendar wizard ----------------
+
+def choose_cycle_or_induction() -> str:
+    """
+    Restrict choices to 'Cycle #' or 'Induction'.
+    - If user selects Cycle, prompt for a positive integer and return 'Cycle N'.
+    - If user selects Induction, return 'Induction'.
+    """
+    print("\nChoose phase label:")
+    print("  1. Cycle #")
+    print("  2. Induction")
+    while True:
+        sel = input("Select [1-2]: ").strip()
+        if sel == "1":
+            while True:
+                n = input("Enter cycle number (e.g., 1, 2, 3): ").strip()
+                if n.isdigit() and int(n) >= 1:
+                    return f"Cycle {int(n)}"
+                print("Please enter a positive integer.")
+        if sel == "2":
+            return "Induction"
+        print("Please choose 1 or 2.")
 
 def calendar_wizard(bank: RegimenBank) -> None:
     names = bank.list_regimens()
@@ -572,7 +642,10 @@ def calendar_wizard(bank: RegimenBank) -> None:
         print(f"Regimen '{reg_name}' not found.")
         return
 
+    # Day 1 can be past or future
     start = read_date("Cycle start date", default=dt.date.today())
+
+    # Cycle length
     while True:
         s = input("Cycle length in days [28]: ").strip()
         if not s:
@@ -583,14 +656,17 @@ def calendar_wizard(bank: RegimenBank) -> None:
             break
         print("Enter a positive integer.")
 
-    # 1) Print text calendar to terminal
-    cal_txt = make_calendar_text(reg, start, cycle_len)
+    # Strict selector: Cycle # or Induction
+    cycle_label = choose_cycle_or_induction()
+
+    # 1) Print text calendar
+    cal_txt = make_calendar_text(reg, start, cycle_len, cycle_label)
     print("\n" + cal_txt + "\n")
 
     # 2) Save options
     safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in reg.name)
-    default_txt = f"{safe_name}_cycle1_{start.isoformat()}.txt"
-    default_docx = f"{safe_name}_cycle1_{start.isoformat()}.docx"
+    default_txt = f"{safe_name}_{cycle_label.replace(' ', '').lower()}_{start.isoformat()}.txt"
+    default_docx = f"{safe_name}_{cycle_label.replace(' ', '').lower()}_{start.isoformat()}.docx"
 
     if input(f"Save text file [{default_txt}]? [Y/n]: ").strip().lower() != "n":
         Path(default_txt).write_text(cal_txt, encoding="utf-8")
@@ -598,10 +674,10 @@ def calendar_wizard(bank: RegimenBank) -> None:
 
     want_docx = input(f"Export DOCX [{default_docx}]? [y/N]: ").strip().lower()
     if want_docx == "y":
-        ok = export_calendar_docx(reg, start, cycle_len, Path(default_docx))
+        ok = export_calendar_docx(reg, start, cycle_len, Path(default_docx), cycle_label)
         if ok:
             print(f"Saved: {default_docx}")
-            print("Reminder: Fill in Patient Name and DOB in the document header area.")
+            print("Reminder: fill Patient Name and DOB in the document.")
         else:
             print("python-docx is not installed. In your Codespace run:  pip install python-docx")
             print("Then re-run: python regimenbank.py calendar")

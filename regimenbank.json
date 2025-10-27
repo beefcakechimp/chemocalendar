@@ -102,10 +102,50 @@
           "duration": "20 Days"
         }
       ]
+    },
+    "CALGB 10403": {
+      "disease_state": "ALL",
+      "therapies": [
+        {
+          "name": "Vincristine",
+          "route": "IV",
+          "dose": "2 mg",
+          "frequency": "Days 1, 8, 15, 22",
+          "duration": "4 Doses"
+        },
+        {
+          "name": "Dexamethasone",
+          "route": "PO",
+          "dose": "10 mg/m2",
+          "frequency": "Day 1-7 and Day 15-21",
+          "duration": "14 Days"
+        },
+        {
+          "name": "Pegaspargase",
+          "route": "IV",
+          "dose": "1000 IU/m2",
+          "frequency": "Day 4",
+          "duration": "once"
+        },
+        {
+          "name": "Daunorubicin",
+          "route": "IV",
+          "dose": "25 mg/m2",
+          "frequency": "Days 1, 8, 15, 22",
+          "duration": "4 Doses"
+        },
+        {
+          "name": "Methotrexate",
+          "route": "IT",
+          "dose": "15 mg",
+          "frequency": "Days 8, 29",
+          "duration": "2 doses"
+        }
+      ]
     }
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-24T18:14:29Z"
+    "updated_at": "2025-10-27T13:14:46Z"
   }
 }
