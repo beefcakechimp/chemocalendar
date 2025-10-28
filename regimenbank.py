@@ -496,6 +496,139 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_pa
           Row 2: merged Name/DOB
           Row 3: weekday header
           Rows 4+: weeks grid
+      - Cell formatting per request:
+          Date = right, bold
+          Day # = left, italic
+          Chemo lines = left, bold
+    """
+    try:
+        from docx import Document
+        from docx.shared import Pt, Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        import calendar as calmod
+    except Exception:
+        return False
+
+    # Build grid
+    first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
+
+    # Month banner (e.g., "October - November 2025" or single month)
+    months = calmod.month_name[first_sun.month]
+    if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
+        months += f" - {calmod.month_name[last_sat.month]}"
+    title_year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
+
+    # Document + page setup
+    doc = Document()
+    section = doc.sections[0]
+    section.orientation = 1  # landscape
+    section.page_width, section.page_height = Inches(11), Inches(8.5)
+    section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = Inches(0.5)
+
+    # Table: 0 title, 1 name/dob, 2 weekday header, 3.. weeks
+    table = doc.add_table(rows=len(grid) + 3, cols=7)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = True
+
+    def merge_row_across(row_idx: int):
+        row = table.rows[row_idx]
+        first_cell = row.cells[0]
+        for j in range(1, 7):
+            first_cell.merge(row.cells[j])
+        return first_cell
+
+    # Row 0: Title (inside table)
+    cell_title = merge_row_across(0)
+    p = cell_title.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("Chemotherapy Calendar\n"); r.bold = True; r.font.size = Pt(14)
+    r2 = p.add_run(f"{reg.name}  - {cycle_label}\n"); r2.font.size = Pt(12)
+    r3 = p.add_run(f"{months} {title_year}"); r3.font.size = Pt(12)
+
+    # Row 1: Name/DOB blanks
+    cell_pid = merge_row_across(1)
+    p = cell_pid.paragraphs[0]
+    p.add_run("Patient Name: ").bold = True; p.add_run("__________________________    ")
+    p.add_run("DOB: ").bold = True; p.add_run("______________")
+
+    # Row 2: Weekday headers
+    hdr = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    for i, text in enumerate(hdr):
+        cell = table.cell(2, i)
+        para = cell.paragraphs[0]
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = para.add_run(text)
+        run.bold = True
+        run.font.size = Pt(10)
+
+    # Body rows with requested formatting
+    body_row_start = 3
+    for w_i, week in enumerate(grid):
+        for d_i, cell in enumerate(week):
+            c = table.cell(body_row_start + w_i, d_i)
+
+            # Reset cell safely
+            c.text = ""  # leaves one empty paragraph
+
+            # Date line: right-aligned, bold
+            p_date = c.paragraphs[0]
+            p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            p_date.paragraph_format.space_after = Pt(0)
+            r_date = p_date.add_run(f"{calmod.month_abbr[cell['date'].month]} {cell['date'].day}")
+            r_date.bold = True
+            r_date.font.size = Pt(9)
+
+            # Day + labels if inside the cycle
+            if cell["cycle_day"] is not None:
+                # Day line: left, italic
+                p_day = c.add_paragraph()
+                p_day.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                p_day.paragraph_format.space_after = Pt(0)
+                r_day = p_day.add_run(f"Day {cell['cycle_day']}")
+                r_day.italic = True
+                r_day.font.size = Pt(9)
+
+                # Labels: left, bold for chemo; leave "Rest" unbolded for subtlety
+                for lab in cell["labels"]:
+                    p_lab = c.add_paragraph()
+                    p_lab.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    p_lab.paragraph_format.space_after = Pt(0)
+                    r_lab = p_lab.add_run(lab)
+                    r_lab.font.size = Pt(9)
+                    if lab.lower() != "rest":
+                        r_lab.bold = True
+
+    # Thin borders for printability
+    def set_tbl_borders(tbl):
+        tbl_pr = tbl._element.tblPr
+        tbl_borders = OxmlElement('w:tblBorders')
+        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+            elem = OxmlElement(f'w:{edge}')
+            elem.set(qn('w:val'), 'single')
+            elem.set(qn('w:sz'), '4')   # 1/8 pt units
+            elem.set(qn('w:space'), '0')
+            elem.set(qn('w:color'), 'auto')
+            tbl_borders.append(elem)
+        tbl_pr.append(tbl_borders)
+
+    set_tbl_borders(table)
+
+    # Footer note (HIPAA reminder)
+    doc.add_paragraph().add_run("Note: Add patient identifiers (Name/DOB) after generating this document.").italic = True
+
+    doc.save(out_path)
+    return True
+
+    """
+    Clinic-style DOCX:
+      - Landscape Letter, 0.5" margins
+      - Table with:
+          Row 1: merged title (3 lines)
+          Row 2: merged Name/DOB
+          Row 3: weekday header
+          Rows 4+: weeks grid
     """
     try:
         from docx import Document
