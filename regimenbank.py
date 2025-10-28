@@ -299,7 +299,7 @@ def wizard(bank: RegimenBank) -> None:
                 duration="7 days",
             )
             ven_dose = prompt_required("Venetoclax dose (e.g., 70 mg / 100 mg / 400 mg)")
-            common_durs = ["7", "14", "18", "21", "28"]
+            common_durs = ["7", "14", "21", "28"]
             print("\nVenetoclax duration days:")
             for i, d in enumerate(common_durs, 1):
                 print(f"  {i}. {d}")
@@ -343,7 +343,7 @@ def wizard(bank: RegimenBank) -> None:
 
         if choice == "1":
             name = prompt_required("Agent name")
-            routes = ["IV", "PO", "SC", "IM", "IT", "IP", "Intra-arterial"]
+            routes = ["IV", "PO", "SQ", "IM", "IT", "Intra-arterial"]
             print("\nRoute options:")
             for i, r in enumerate(routes, 1):
                 print(f"  {i}. {r}")
