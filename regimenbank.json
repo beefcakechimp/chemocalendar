@@ -142,10 +142,41 @@
           "duration": "2 doses"
         }
       ]
+    },
+    "Aza/Ven 100 mg": {
+      "disease_state": "AML",
+      "therapies": [
+        {
+          "name": "Azacitidine",
+          "route": "IV",
+          "dose": "75 mg/m^2",
+          "frequency": "Days 1–7",
+          "duration": "7 days"
+        },
+        {
+          "name": "Venetoclax",
+          "route": "PO",
+          "dose": "100 mg",
+          "frequency": "Days 1-14",
+          "duration": "14 Days"
+        }
+      ]
+    },
+    "CIRB 25-0871 Cirtuvivent Monotherapy": {
+      "disease_state": "AML",
+      "therapies": [
+        {
+          "name": "Cirtuvivent",
+          "route": "PO",
+          "dose": "60 mg",
+          "frequency": "Days 1,4,8,11,15,18,22,25",
+          "duration": "8 Doses"
+        }
+      ]
     }
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-27T13:19:20Z"
+    "updated_at": "2025-10-28T13:11:44Z"
   }
 }
