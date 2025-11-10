@@ -173,10 +173,29 @@
           "duration": "8 Doses"
         }
       ]
+    },
+    "Gilteritinib + Venetoclax": {
+      "disease_state": "AML",
+      "therapies": [
+        {
+          "name": "Gilteritinib",
+          "route": "PO",
+          "dose": "120 mg",
+          "frequency": "Days 1-28",
+          "duration": "28 Days"
+        },
+        {
+          "name": "Venetoclax",
+          "route": "PO",
+          "dose": "70 mg",
+          "frequency": "Days 4-17",
+          "duration": "14 Days"
+        }
+      ]
     }
   },
   "_meta": {
     "version": 2,
-    "updated_at": "2025-10-28T13:11:44Z"
+    "updated_at": "2025-10-29T12:48:16Z"
   }
 }
