@@ -12,7 +12,6 @@ DB_PATH = Path("regimenbank.json")
 st.set_page_config(page_title="Chemo Calendar", layout="wide")
 
 def _rerun():
-    # Streamlit >= 1.27 uses st.rerun(); older builds used experimental_rerun
     import streamlit as st
     if hasattr(st, "rerun"):
         st.rerun()
@@ -206,7 +205,7 @@ if view == "Regimens":
                         # inline editor
                         edit_idx = st.session_state.get("edit_idx", None)
                         if isinstance(edit_idx, int) and 0 <= edit_idx < len(reg.therapies):
-                            st.markdown("#### Edit agent")
+                            st.markdown("Edit existing chemotherapy")
                             t = reg.therapies[edit_idx]
                             name = st.text_input("Agent name", value=t.name, key="e_name")
                             route = st.selectbox("Route", ["IV","PO","SQ","IM","IT",], index=["IV","PO","SQ","IM","IT"].index(t.route) if t.route in ["IV","PO","SQ","IM","IT"] else 0)
@@ -256,7 +255,7 @@ if view == "Regimens":
                                 _rerun()
 
     with colB:
-        st.markdown("### Danger zone")
+        st.markdown("Delete?")
         names = get_regimens(bank)
         if names:
             sel_del = st.selectbox("Select regimen to delete", options=names, key="del_sel")
@@ -277,9 +276,9 @@ if view == "Calendar":
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            start = st.date_input("Day 1 (can be in past)", value=dt.date.today())
+            start = st.date_input("Enter Day 1 (default is today)", value=dt.date.today())
         with c2:
-            cycle_len = st.number_input("Cycle length (days)", min_value=1, step=1, value=28)
+            cycle_len = st.number_input("Cycle length (default is 28)", min_value=1, step=1, value=28)
         with c3:
             cycle_label = cycle_label_ui()  # Cycle # or Induction
 
