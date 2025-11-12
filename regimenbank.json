@@ -22,6 +22,7 @@
     },
     "Aza/ven 70 mg": {
       "disease_state": "AML",
+      "notes": "14 days",
       "therapies": [
         {
           "name": "Azacitidine",
@@ -34,8 +35,8 @@
           "name": "Venetoclax",
           "route": "PO",
           "dose": "70 mg",
-          "frequency": "Days 1–21",
-          "duration": "21 days"
+          "frequency": "Daily",
+          "duration": "Days 1-14"
         }
       ]
     },
@@ -195,7 +196,7 @@
     }
   },
   "_meta": {
-    "version": 2,
-    "updated_at": "2025-10-29T12:48:16Z"
+    "version": 3,
+    "updated_at": "2025-11-12T01:34:17Z"
   }
 }

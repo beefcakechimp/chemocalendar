@@ -1,126 +1,104 @@
 #!/usr/bin/env python3
-"""
-regimenbank.py — JSON-backed regimen bank + calendar (TXT and DOCX export)
-
-What you get
-- Interactive Regimen Wizard: create/edit regimens; per-agent durations.
-- Add agents brand-new OR reuse from existing agents across all regimens.
-- Calendar Wizard: pick regimen, enter start date (supports past Day 1), choose "Cycle # or Induction",
-  pick cycle length, then print/save (TXT) and optionally export DOCX matching clinic style.
-- HIPAA-friendly: DOCX has blanks for Patient Name and DOB.
-
-Requires no external deps unless you export DOCX:
-  pip install python-docx
-"""
-
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+
 import argparse
-import calendar
+import calendar as cal
 import datetime as dt
 import json
+import os
+import re
 import sys
 import tempfile
 import time
-import re
+from dataclasses import dataclass, asdict, field, replace
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-SCHEMA_VERSION = 2
+# ---------------- config ----------------
+SCHEMA_VERSION = 3
 DEFAULT_DB = Path("regimenbank.json")
+ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
-# ---------------- Models ----------------
+# ---------------- console style (notes only on selection) ----------------
+def _supports_ansi() -> bool:
+    return sys.stdout.isatty() and (os.name != "nt" or "WT_SESSION" in os.environ or "TERM" in os.environ)
 
+def _italic(s: str) -> str:
+    return f"\x1b[3m{s}\x1b[0m" if _supports_ansi() else s
+
+# ---------------- models ----------------
 @dataclass
 class Chemotherapy:
     name: str
     route: str
     dose: str
-    frequency: str  # e.g., "Days 1–7", "Days 1-21", "Days 1,8,15"
-    duration: str   # e.g., "7 days" (stored per instance)
+    frequency: str   # FREE TEXT (e.g., "once", "daily", "BID", "TID", "weekly")
+    duration: str    # DAY MAP (parsed): e.g., "Days 1–7", "Days 1,8,15", "Days 1–7, 15–21"
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Chemotherapy":
-        return Chemotherapy(
-            name=d["name"],
-            route=d["route"],
-            dose=d["dose"],
-            frequency=d["frequency"],
-            duration=d["duration"],
-        )
+        return Chemotherapy(d["name"], d["route"], d["dose"], d["frequency"], d["duration"])
 
 @dataclass
 class Regimen:
-    name: str                    # e.g., "AZA/VEN 70 mg"
+    name: str
     disease_state: Optional[str] = None
+    notes: Optional[str] = None     # stored; shown only on selection screen
     therapies: List[Chemotherapy] = field(default_factory=list)
 
     @staticmethod
     def from_dict(name: str, d: Dict[str, Any]) -> "Regimen":
-        therapies = [Chemotherapy.from_dict(x) for x in d.get("therapies", [])]
-        return Regimen(name=name, disease_state=d.get("disease_state"), therapies=therapies)
+        return Regimen(
+            name=name,
+            disease_state=d.get("disease_state"),
+            notes=d.get("notes"),
+            therapies=[Chemotherapy.from_dict(x) for x in d.get("therapies", [])],
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "disease_state": self.disease_state,
+            "notes": self.notes,
             "therapies": [asdict(t) for t in self.therapies],
         }
 
-    def upsert_chemo(self, chemo: Chemotherapy) -> None:
-        key = chemo.name.strip().lower()
-        for i, existing in enumerate(self.therapies):
-            if existing.name.strip().lower() == key:
-                self.therapies[i] = chemo
+    def upsert_chemo(self, c: Chemotherapy) -> None:
+        key = c.name.strip().lower()
+        for i, t in enumerate(self.therapies):
+            if t.name.strip().lower() == key:
+                self.therapies[i] = c
                 return
-        self.therapies.append(chemo)
+        self.therapies.append(c)
 
-    def remove_chemo(self, chemo_name: str) -> bool:
-        key = chemo_name.strip().lower()
-        before = len(self.therapies)
-        self.therapies = [c for c in self.therapies if c.name.strip().lower() != key]
-        return len(self.therapies) != before
-
-# ---------------- Storage ----------------
-
+# ---------------- storage ----------------
 class RegimenBank:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.data: Dict[str, Any] = {}
+        self.data: Dict[str, Any] = {"_meta": {"version": SCHEMA_VERSION, "updated_at": None}, "regimens": {}}
         self._load()
 
     def _load(self) -> None:
-        # Safe defaults
-        self.data = {"_meta": {"version": SCHEMA_VERSION, "updated_at": None}, "regimens": {}}
-        if self.db_path.exists():
-            try:
-                with self.db_path.open("r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                if isinstance(raw, dict):
-                    if "_meta" not in raw or not isinstance(raw["_meta"], dict):
-                        raw["_meta"] = {"version": SCHEMA_VERSION, "updated_at": None}
-                    if "regimens" not in raw or not isinstance(raw["regimens"], dict):
-                        raw["regimens"] = {}
-                    self.data = raw
-            except Exception:
-                # Corrupt: keep defaults
-                pass
+        if not self.db_path.exists():
+            return
+        try:
+            raw = json.loads(self.db_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+            raw.setdefault("_meta", {"version": SCHEMA_VERSION, "updated_at": None})
+            raw.setdefault("regimens", {})
+            self.data = raw
+        except Exception:
+            pass  # keep defaults on corruption
 
     def _save(self) -> None:
-        if "_meta" not in self.data or not isinstance(self.data["_meta"], dict):
-            self.data["_meta"] = {"version": SCHEMA_VERSION, "updated_at": None}
-        if "regimens" not in self.data or not isinstance(self.data["regimens"], dict):
-            self.data["regimens"] = {}
         self.data["_meta"]["version"] = SCHEMA_VERSION
         self.data["_meta"]["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-        tmp_dir = self.db_path.parent if self.db_path.parent.exists() else Path(".")
-        with tempfile.NamedTemporaryFile("w", delete=False, dir=tmp_dir, suffix=".tmp", encoding="utf-8") as tf:
+        tmpdir = self.db_path.parent if self.db_path.parent.exists() else Path(".")
+        with tempfile.NamedTemporaryFile("w", delete=False, dir=tmpdir, suffix=".tmp", encoding="utf-8") as tf:
             json.dump(self.data, tf, indent=2, ensure_ascii=False)
-            tf.flush()
-            tmp_name = tf.name
-        Path(tmp_name).replace(self.db_path)
+            tmp = tf.name
+        Path(tmp).replace(self.db_path)
 
-    # Regimen ops
     def list_regimens(self) -> List[str]:
         return sorted(self.data.get("regimens", {}).keys())
 
@@ -128,321 +106,154 @@ class RegimenBank:
         rec = self.data.get("regimens", {}).get(name.strip())
         return Regimen.from_dict(name.strip(), rec) if rec else None
 
-    def upsert_regimen(self, regimen: Regimen) -> None:
-        self.data.setdefault("regimens", {})[regimen.name] = regimen.to_dict()
+    def upsert_regimen(self, reg: Regimen) -> None:
+        self.data.setdefault("regimens", {})[reg.name] = reg.to_dict()
         self._save()
 
     def delete_regimen(self, name: str) -> bool:
-        key = name.strip()
-        if key in self.data.get("regimens", {}):
-            del self.data["regimens"][key]
+        regs = self.data.get("regimens", {})
+        if name in regs:
+            del regs[name]
             self._save()
             return True
         return False
 
-# ---------------- Helpers (dropdown + parsing) ----------------
+    def save_as(self, reg: Regimen, new_name: str) -> None:
+        r2 = replace(reg, name=new_name)
+        self.upsert_regimen(r2)
 
-def choose_from(prompt: str, options: List[str], allow_new: bool = False) -> Tuple[str, bool]:
+# ---------------- small IO helpers ----------------
+def _choose(prompt: str, options: List[str], allow_new=False) -> Tuple[str, bool]:
     print(f"\n{prompt}")
-    if not options:
-        if allow_new:
-            val = input("No options yet. Enter a new name: ").strip()
-            return val, True
-        raise SystemExit("No options available.")
-    for i, opt in enumerate(options, 1):
-        print(f"  {i}. {opt}")
+    for i, o in enumerate(options, 1):
+        print(f"  {i}. {o}")
     if allow_new:
         print("  n. <Add new>")
     while True:
-        sel = input("Choose number" + (" or 'n' to add new: " if allow_new else ": ")).strip()
-        if allow_new and sel.lower() == "n":
+        s = input("Select: ").strip().lower()
+        if allow_new and s == "n":
             val = input("Enter new name: ").strip()
             if val:
                 return val, True
-        if sel.isdigit():
-            idx = int(sel)
-            if 1 <= idx <= len(options):
-                return options[idx - 1], False
-        print("Invalid selection. Try again.")
+        if s.isdigit():
+            k = int(s)
+            if 1 <= k <= len(options):
+                return options[k - 1], False
+        print("Invalid. Try again.")
 
-def prompt_required(label: str, prefill: Optional[str] = None) -> str:
+def _req(label: str, pre: Optional[str] = None) -> str:
     while True:
-        v = input(f"{label}{f' [{prefill}]' if prefill else ''}: ").strip()
-        if not v and prefill:
-            return prefill
-        if v:
-            return v
-        print("Required. Please enter a value.")
+        s = input(f"{label}{f' [{pre}]' if pre else ''}: ").strip()
+        if s: return s
+        if pre: return pre
+        print("Required.")
 
-def prompt_optional(label: str, prefill: Optional[str] = None) -> Optional[str]:
-    v = input(f"{label}{f' [{prefill}]' if prefill else ''} (optional): ").strip()
-    return v or prefill
+def _opt(label: str, pre: Optional[str] = None) -> Optional[str]:
+    s = input(f"{label}{f' [{pre}]' if pre else ''} (optional): ").strip()
+    return s or pre
 
-def parse_frequency_days(freq: str) -> List[int]:
-    """
-    Parses: "Days 1–7", "Days 1-21", "Days 1,8,15", "Days 1–7, 15"
-    """
-    s = freq.replace("–", "-").lower().strip()
-    m = re.search(r"days\s+(.+)", s)
-    if not m:
-        return []
-    part = m.group(1)
-    days: List[int] = []
-    for token in re.split(r"[,\s]+", part):
-        if not token:
-            continue
-        if "-" in token:
-            try:
-                a, b = token.split("-", 1)
-                a, b = int(a), int(b)
-                if a <= b:
-                    days.extend(range(a, b + 1))
-            except ValueError:
-                continue
-        else:
-            try:
-                days.append(int(token))
-            except ValueError:
-                continue
-    return sorted(set(days))
-
-def read_date(prompt: str, default: Optional[dt.date] = None) -> dt.date:
-    """
-    Accepts:
-      YYYY-MM-DD
-      M/D/YY or M/D/YYYY  (e.g., 10/23/25 or 1/1/2025)
-      'today' or 't'
-      '+N'  → N days from today
-    """
+def _parse_date(label: str, default: Optional[dt.date] = None) -> dt.date:
     while True:
         hint = f" [{default.strftime('%m/%d/%y')}]" if default else ""
-        s = input(f"{prompt}{hint}: ").strip().lower()
-        if not s and default:
-            return default
-        if s in ("t", "today"):
-            return dt.date.today()
-        if s.startswith("+") and s[1:].isdigit():
-            return dt.date.today() + dt.timedelta(days=int(s[1:]))
+        s = input(f"{label}{hint}: ").strip().lower()
+        if not s and default: return default
+        if s in {"t", "today"}: return dt.date.today()
+        if s.startswith("+") and s[1:].isdigit(): return dt.date.today() + dt.timedelta(days=int(s[1:]))
         for fmt in ("%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y"):
-            try:
-                return dt.datetime.strptime(s, fmt).date()
-            except ValueError:
-                continue
-        print("Enter date as YYYY-MM-DD, M/D/YY, M/D/YYYY, 'today', or +N (e.g., +7).")
+            try: return dt.datetime.strptime(s, fmt).date()
+            except ValueError: pass
+        print("Use YYYY-MM-DD, M/D/YY, M/D/YYYY, 'today', or +N.")
 
-# ---------- Agent Catalog (reuse from existing) ----------
+def _edit_agent(base: Chemotherapy) -> Chemotherapy:
+    name = _req("Agent name", base.name)
+    route = _req(f"Route ({'/'.join(ROUTES)})", base.route)
+    dose  = _req("Dose", base.dose)
+    frequency = _req("Frequency (free text: once / daily / BID / TID / weekly ...)", base.frequency)
+    duration  = _req("Day map for calendar (e.g., 'Days 1–7' or 'Days 1,8,15')", base.duration)
+    return Chemotherapy(name, route, dose, frequency, duration)
 
-def build_agent_catalog(bank: RegimenBank) -> Dict[str, List[Chemotherapy]]:
-    """
-    Collect all agents across all regimens and bucket them by agent name (case-insensitive).
-    Returns dict: name_key -> list[Chemotherapy variants]
-    """
-    catalog: Dict[str, List[Chemotherapy]] = {}
-    for rname in bank.list_regimens():
-        reg = bank.get_regimen(rname)
-        if not reg:
-            continue
-        for t in reg.therapies:
-            key = t.name.strip().lower()
-            catalog.setdefault(key, [])
-            # Avoid duplicate exact variants
-            if not any((v.route == t.route and v.dose == t.dose and v.frequency == t.frequency and v.duration == t.duration)
-                       for v in catalog[key]):
-                catalog[key].append(t)
-    return catalog
+# ---------------- notes on selection only ----------------
+def _select_regimen_with_notes(bank: RegimenBank, title: str, allow_new=False) -> Tuple[Optional[str], bool]:
+    names = bank.list_regimens()
+    if not names and not allow_new:
+        return None, False
+    if not names and allow_new:
+        val = input("No regimens yet. Enter a new regimen name: ").strip()
+        return (val if val else None), True
 
-def choose_agent_from_catalog(catalog: Dict[str, List[Chemotherapy]]) -> Optional[Chemotherapy]:
-    """
-    Dropdown to choose agent name, then choose variant if multiple.
-    Returns a cloned Chemotherapy or None if catalog empty.
-    """
-    if not catalog:
-        print("No existing agents saved yet.")
-        return None
-    name_options = sorted(set(k for k in catalog.keys()))
-    display = [n.title() for n in name_options]
-    choice, _ = choose_from("Choose an existing agent to reuse:", display, allow_new=False)
-    key = name_options[display.index(choice)]
-    variants = catalog[key]
-    if len(variants) == 1:
-        v = variants[0]
-        print(f"Selected: {v.name} | {v.route} | {v.dose} | {v.frequency} | {v.duration}")
-        return Chemotherapy(v.name, v.route, v.dose, v.frequency, v.duration)
-    else:
-        for i, v in enumerate(variants, 1):
-            print(f"  {i}. {v.route} | {v.dose} | {v.frequency} | {v.duration}")
-        while True:
-            sel = input("Pick a variant by number: ").strip()
-            if sel.isdigit() and 1 <= int(sel) <= len(variants):
-                v = variants[int(sel) - 1]
-                return Chemotherapy(v.name, v.route, v.dose, v.frequency, v.duration)
-            print("Invalid selection.")
-    return None
-
-# ---------------- Regimen Wizard ----------------
-
-def wizard(bank: RegimenBank) -> None:
-    print("\n=== Regimen Wizard ===")
-    reg_names = bank.list_regimens()
-    reg_name, is_new = choose_from("Select a regimen or add a new one:", reg_names, allow_new=True)
-    reg = bank.get_regimen(reg_name) if not is_new else Regimen(name=reg_name)
-    reg.disease_state = prompt_optional("Disease state", reg.disease_state)
-
-    if is_new and "ven" in reg_name.lower():
-        quick = input("Scaffold AZA/VEN agents now? [y/N]: ").strip().lower() == "y"
-        if quick:
-            aza = Chemotherapy(
-                name="Azacitidine",
-                route="IV",
-                dose=prompt_required("Azacitidine dose (e.g., 75 mg/m^2)"),
-                frequency="Days 1–7",
-                duration="7 days",
-            )
-            ven_dose = prompt_required("Venetoclax dose (e.g., 70 mg / 100 mg / 400 mg)")
-            common_durs = ["7", "14", "18", "21", "28"]
-            print("\nVenetoclax duration days:")
-            for i, d in enumerate(common_durs, 1):
-                print(f"  {i}. {d}")
-            print("  n. Other")
-            while True:
-                sel = input("Choose duration number, actual day count (e.g., 21), or 'n': ").strip().lower()
-                if sel.isdigit():
-                    val = int(sel)
-                    if 1 <= val <= 365:
-                        ven_days = val; break
-                if sel.isdigit() and 1 <= int(sel) <= len(common_durs):
-                    ven_days = int(common_durs[int(sel) - 1]); break
-                if sel == "n":
-                    ven_days = int(prompt_required("Enter Venetoclax duration days (integer)")); break
-                print("Invalid selection.")
-            ven = Chemotherapy(
-                name="Venetoclax",
-                route="PO",
-                dose=ven_dose,
-                frequency=f"Days 1–{ven_days}",
-                duration=f"{ven_days} days",
-            )
-            reg.upsert_chemo(aza)
-            reg.upsert_chemo(ven)
+    print(f"\n{title}")
+    index_map: Dict[str, str] = {}
+    for i, n in enumerate(names, 1):
+        reg = bank.get_regimen(n)
+        note = f"  {_italic('— ' + reg.notes)}" if reg and reg.notes else ""
+        print(f"  {i}. {n}{note}")
+        index_map[str(i)] = n
+    if allow_new:
+        print("  n. <Add new>")
 
     while True:
-        print("\nCurrent therapies:")
-        if not reg.therapies:
-            print("  (none yet)")
+        sel = input("Select: ").strip().lower()
+        if allow_new and sel == "n":
+            val = input("Enter new regimen name: ").strip()
+            if val:
+                return val, True
+        if sel in index_map:
+            return index_map[sel], False
+        print("Invalid. Try again.")
+
+# ---------------- day-map parsing ----------------
+def parse_day_spec(day_spec: str) -> List[int]:
+    """Parse a 'Days ...' string into explicit day numbers."""
+    if not day_spec:
+        return []
+    s = day_spec.replace("–", "-").strip().lower()
+    m = re.search(r"^days\s+(.+)$", s)
+    if not m:
+        return []
+    tokens = re.split(r"[,\s]+", m.group(1))
+    out: List[int] = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if "-" in tok:
+            try:
+                a, b = map(int, tok.split("-", 1))
+                if a <= b:
+                    out.extend(range(a, b + 1))
+            except ValueError:
+                pass
         else:
-            for i, t in enumerate(reg.therapies, 1):
-                print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
+            try:
+                out.append(int(tok))
+            except ValueError:
+                pass
+    return sorted(set(d for d in out if d >= 1))
 
-        print("\nActions:")
-        print("  1. Add a new agent")
-        print("  2. Add from existing agents")
-        print("  3. Edit an existing agent")
-        print("  4. Remove an agent")
-        print("  5. Save and finish")
-        choice = input("Select action [1-5]: ").strip()
-
-        if choice == "1":
-            name = prompt_required("Agent name")
-            routes = ["IV", "PO", "SC", "IM", "IT", "IP", "Intra-arterial"]
-            print("\nRoute options:")
-            for i, r in enumerate(routes, 1):
-                print(f"  {i}. {r}")
-            print("  n. Other")
-            while True:
-                rs = input("Choose route or 'n': ").strip().lower()
-                if rs.isdigit() and 1 <= int(rs) <= len(routes):
-                    route = routes[int(rs) - 1]; break
-                if rs == "n":
-                    route = prompt_required("Route"); break
-                print("Invalid selection.")
-            dose = prompt_required("Dose (e.g., 75 mg/m^2)")
-            freq = prompt_required("Frequency (e.g., Days 1–7 or Days 1,8,15)")
-            dur  = prompt_required("Duration (e.g., 7 days)")
-            reg.upsert_chemo(Chemotherapy(name, route, dose, freq, dur))
-
-        elif choice == "2":
-            catalog = build_agent_catalog(bank)
-            tmpl = choose_agent_from_catalog(catalog)
-            if tmpl:
-                print("\nYou can accept as-is or tweak fields.")
-                name = prompt_required("Agent name", tmpl.name)
-                route = prompt_required("Route", tmpl.route)
-                dose = prompt_required("Dose", tmpl.dose)
-                freq = prompt_required("Frequency", tmpl.frequency)
-                dur  = prompt_required("Duration", tmpl.duration)
-                reg.upsert_chemo(Chemotherapy(name, route, dose, freq, dur))
-
-        elif choice == "3":
-            if not reg.therapies:
-                print("No agents to edit."); continue
-            idx = input("Enter agent number to edit: ").strip()
-            if not (idx.isdigit() and 1 <= int(idx) <= len(reg.therapies)):
-                print("Invalid number."); continue
-            i = int(idx) - 1
-            t = reg.therapies[i]
-            t.name = prompt_required("Agent name", t.name)
-            t.route = prompt_required("Route", t.route)
-            t.dose = prompt_required("Dose", t.dose)
-            t.frequency = prompt_required("Frequency", t.frequency)
-            t.duration = prompt_required("Duration", t.duration)
-            reg.therapies[i] = t
-
-        elif choice == "4":
-            if not reg.therapies:
-                print("No agents to remove."); continue
-            idx = input("Enter agent number to remove: ").strip()
-            if idx.isdigit() and 1 <= int(idx) <= len(reg.therapies):
-                removed = reg.therapies.pop(int(idx) - 1)
-                print(f"Removed {removed.name}.")
-            else:
-                print("Invalid number.")
-
-        elif choice == "5":
-            bank.upsert_regimen(reg)
-            print(f"\nSaved regimen '{reg.name}'.")
-            return
-        else:
-            print("Choose 1–5.")
-
-# ---------------- Calendar core ----------------
-
-def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
-    """
-    Returns (first_week_sun, last_week_sat, max_day, grid)
-    grid: List[week] where week = List[dict] for 7 days with keys:
-      date, cycle_day (int|None), labels (List[str])
-    """
-    # Map day numbers to agents
-    agent_days: Dict[str, List[int]] = {}
-    max_day = cycle_length
+# ---------------- grid + exports ----------------
+def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
+    max_day = cycle_len
+    by_day: Dict[int, List[str]] = {d: [] for d in range(1, cycle_len + 1)}
     for t in reg.therapies:
-        days = parse_frequency_days(t.frequency)
-        agent_days[t.name] = [d for d in days if 1 <= d <= cycle_length]
-        if days:
-            max_day = max(max_day, max(days))
+        dlist = [d for d in parse_day_spec(t.duration) if d <= cycle_len]
+        if dlist:
+            max_day = max(max_day, max(dlist))
+            for d in dlist:
+                by_day.setdefault(d, []).append(t.name)
 
-    day_labels: Dict[int, List[str]] = {d: [] for d in range(1, max_day + 1)}
-    for t in reg.therapies:
-        for d in agent_days.get(t.name, []):
-            day_labels.setdefault(d, []).append(t.name)
+    first_sun = start - dt.timedelta(days=(start.weekday() + 1) % 7)
+    last_needed = start + dt.timedelta(days=max_day - 1)
+    last_sat = last_needed + dt.timedelta(days=(5 - last_needed.weekday()) % 7 + 1)
 
-    # Sunday of the start week (past or future ok)
-    first_week_sun = start - dt.timedelta(days=(start.weekday() + 1) % 7)
-    last_date_needed = start + dt.timedelta(days=max_day - 1)
-    # Saturday of the last needed week
-    last_week_sat = last_date_needed + dt.timedelta(days=(5 - last_date_needed.weekday()) % 7 + 1)
-
-    # Build grid
     grid: List[List[Dict[str, Any]]] = []
-    d = first_week_sun
+    d = first_sun
     week: List[Dict[str, Any]] = []
-    while d <= last_week_sat:
+    while d <= last_sat:
         entry: Dict[str, Any] = {"date": d, "cycle_day": None, "labels": []}
         if d >= start:
-            cday = (d - start).days + 1
-            if 1 <= cday <= max_day:
-                entry["cycle_day"] = cday
-                entry["labels"] = list(day_labels.get(cday, [])) or ["Rest"]
+            cd = (d - start).days + 1
+            if 1 <= cd <= max_day:
+                entry["cycle_day"] = cd
+                entry["labels"] = by_day.get(cd, []) or ["Rest"]
         week.append(entry)
         if len(week) == 7:
             grid.append(week); week = []
@@ -452,424 +263,364 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_length: int):
             week.append({"date": d, "cycle_day": None, "labels": []})
             d += dt.timedelta(days=1)
         grid.append(week)
-    return first_week_sun, last_week_sat, max_day, grid
+    return first_sun, last_sat, max_day, grid
 
-def make_calendar_text(reg: Regimen, start: dt.date, cycle_length: int, cycle_label: str) -> str:
-    first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
-    out = []
-    months = calendar.month_name[first_sun.month]
+def make_calendar_text(reg: Regimen, start: dt.date, cycle_len: int, cycle_label: str, note: Optional[str] = None) -> str:
+    first_sun, last_sat, _, grid = compute_calendar_grid(reg, start, cycle_len)
+    months = cal.month_name[first_sun.month]
     if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
-        months += f" - {calendar.month_name[last_sat.month]}"
-    title_year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
-    out.append(f"{reg.name} — {cycle_label}")
-    out.append(f"{months} {title_year}")
-    out.append("Sun       Mon       Tue       Wed       Thu       Fri       Sat")
+        months += f" - {cal.month_name[last_sat.month]}"
+    year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
 
+    lines = [f"{reg.name} — {cycle_label}", f"{months} {year}"]
+    if note: lines.append(f"Note: {note}")
+    lines.append("Sun       Mon       Tue       Wed       Thu       Fri       Sat")
+
+    colw = 12
     for week in grid:
-        col_width = 12
-        cell_lines = [ [] for _ in range(7) ]
-        max_lines = 0
-        for idx, cell in enumerate(week):
-            lines = [f"{calendar.month_abbr[cell['date'].month]} {cell['date'].day}"]
-            if cell["cycle_day"] is not None:
-                lines.append(f"Day {cell['cycle_day']}")
-                lines.extend(cell["labels"])
-            max_lines = max(max_lines, len(lines))
-            cell_lines[idx] = lines
-        for row in range(max_lines):
-            row_parts = []
-            for col in range(7):
-                ln = cell_lines[col][row] if row < len(cell_lines[col]) else ""
-                row_parts.append(ln.ljust(col_width))
-            out.append(" ".join(row_parts))
-        out.append("")
-    return "\n".join(out)
+        cells: List[List[str]] = []
+        maxh = 0
+        for c in week:
+            block = [f"{cal.month_abbr[c['date'].month]} {c['date'].day}"]
+            if c["cycle_day"] is not None:
+                block.append(f"Day {c['cycle_day']}")
+                block.extend(c["labels"])
+            maxh = max(maxh, len(block))
+            cells.append(block)
+        for r in range(maxh):
+            row = []
+            for b in cells:
+                txt = b[r] if r < len(b) else ""
+                row.append(txt.ljust(colw))
+            lines.append(" ".join(row))
+        lines.append("")
+    return "\n".join(lines)
 
-# ---------------- DOCX export (clinic style) ----------------
-
-def export_calendar_docx(reg: Regimen, start: dt.date, cycle_length: int, out_path: Path, cycle_label: str) -> bool:
-    """
-    Clinic-style DOCX:
-      - Landscape Letter, 0.5" margins
-      - Table with:
-          Row 1: merged title (3 lines)
-          Row 2: merged Name/DOB
-          Row 3: weekday header
-          Rows 4+: weeks grid
-      - Cell formatting per request:
-          Date = right, bold
-          Day # = left, italic
-          Chemo lines = left, bold
-    """
+def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path: Path, cycle_label: str, note: Optional[str] = None) -> bool:
     try:
         from docx import Document
         from docx.shared import Pt, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.enum.table import WD_TABLE_ALIGNMENT
-        from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
-        import calendar as calmod
+        from docx.oxml.ns import qn
     except Exception:
         return False
 
-    # Build grid
-    first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
-
-    # Month banner (e.g., "October - November 2025" or single month)
-    months = calmod.month_name[first_sun.month]
+    first_sun, last_sat, _, grid = compute_calendar_grid(reg, start, cycle_len)
+    months = cal.month_name[first_sun.month]
     if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
-        months += f" - {calmod.month_name[last_sat.month]}"
-    title_year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
+        months += f" - {cal.month_name[last_sat.month]}"
+    year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
 
-    # Document + page setup
     doc = Document()
-    section = doc.sections[0]
-    section.orientation = 1  # landscape
-    section.page_width, section.page_height = Inches(11), Inches(8.5)
-    section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = Inches(0.5)
+    sec = doc.sections[0]
+    sec.orientation = 1
+    sec.page_width, sec.page_height = Inches(11), Inches(8.5)
+    sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    # Table: 0 title, 1 name/dob, 2 weekday header, 3.. weeks
-    table = doc.add_table(rows=len(grid) + 3, cols=7)
+    # header (logo + name/dob)
+    hdr = sec.header
+    htbl = hdr.add_table(rows=1, cols=2)
+    htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+    left = htbl.cell(0, 0).paragraphs[0]
+    right = htbl.cell(0, 1).paragraphs[0]
+    logo = Path("ucmlogo.png")
+    try:
+        if logo.exists():
+            left.add_run().add_picture(str(logo), height=Inches(0.6))
+    except Exception:
+        pass
+    right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    rh = right.add_run("Name: ______________________    DOB: ____________")
+    rh.italic = True; rh.font.size = Pt(10)
+    doc.add_paragraph()  # spacer
+
+    # title + table
+    table = doc.add_table(rows=len(grid) + 2, cols=7)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = True
 
-    def merge_row_across(row_idx: int):
-        row = table.rows[row_idx]
-        first_cell = row.cells[0]
-        for j in range(1, 7):
-            first_cell.merge(row.cells[j])
-        return first_cell
+    def merge_row(i: int):
+        row = table.rows[i]; cell0 = row.cells[0]
+        for j in range(1, 7): cell0.merge(row.cells[j])
+        return cell0
 
-    # Row 0: Title (inside table)
-    cell_title = merge_row_across(0)
-    p = cell_title.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("Chemotherapy Calendar\n"); r.bold = True; r.font.size = Pt(14)
-    r2 = p.add_run(f"{reg.name}  - {cycle_label}\n"); r2.font.size = Pt(12)
-    r3 = p.add_run(f"{months} {title_year}"); r3.font.size = Pt(12)
+    ct = merge_row(0).paragraphs[0]; ct.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    t1 = ct.add_run("Chemotherapy Calendar\n"); t1.bold = True; t1.font.size = Pt(14)
+    t2 = ct.add_run(f"{reg.name}  - {cycle_label}\n"); t2.font.size = Pt(12)
+    t3 = ct.add_run(f"{months} {year}"); t3.font.size = Pt(12)
+    if note: ct.add_run(f"\n{note}").italic = True
 
-    # Row 1: Name/DOB blanks
-    cell_pid = merge_row_across(1)
-    p = cell_pid.paragraphs[0]
-    p.add_run("Patient Name: ").bold = True; p.add_run("__________________________    ")
-    p.add_run("DOB: ").bold = True; p.add_run("______________")
+    for i, dname in enumerate(["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]):
+        p = table.cell(1, i).paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        rr = p.add_run(dname); rr.bold = True; rr.font.size = Pt(10)
 
-    # Row 2: Weekday headers
-    hdr = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    for i, text in enumerate(hdr):
-        cell = table.cell(2, i)
-        para = cell.paragraphs[0]
-        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = para.add_run(text)
-        run.bold = True
-        run.font.size = Pt(10)
-
-    # Body rows with requested formatting
-    body_row_start = 3
-    for w_i, week in enumerate(grid):
-        for d_i, cell in enumerate(week):
-            c = table.cell(body_row_start + w_i, d_i)
-
-            # Reset cell safely
-            c.text = ""  # leaves one empty paragraph
-
-            # Date line: right-aligned, bold
-            p_date = c.paragraphs[0]
-            p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    body_start = 2
+    for wi, week in enumerate(grid):
+        for di, cell in enumerate(week):
+            c = table.cell(body_start + wi, di)
+            c.text = ""
+            p_date = c.paragraphs[0]; p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p_date.paragraph_format.space_after = Pt(0)
-            r_date = p_date.add_run(f"{calmod.month_abbr[cell['date'].month]} {cell['date'].day}")
-            r_date.bold = True
-            r_date.font.size = Pt(9)
-
-            # Day + labels if inside the cycle
+            rd = p_date.add_run(f"{cal.month_abbr[cell['date'].month]} {cell['date'].day}")
+            rd.bold = True; rd.font.size = Pt(9)
             if cell["cycle_day"] is not None:
-                # Day line: left, italic
-                p_day = c.add_paragraph()
-                p_day.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                p_day = c.add_paragraph(); p_day.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 p_day.paragraph_format.space_after = Pt(0)
-                r_day = p_day.add_run(f"Day {cell['cycle_day']}")
-                r_day.italic = True
-                r_day.font.size = Pt(9)
-
-                # Labels: left, bold for chemo; leave "Rest" unbolded for subtlety
+                rday = p_day.add_run(f"Day {cell['cycle_day']}"); rday.italic = True; rday.font.size = Pt(9)
                 for lab in cell["labels"]:
-                    p_lab = c.add_paragraph()
-                    p_lab.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    p_lab.paragraph_format.space_after = Pt(0)
-                    r_lab = p_lab.add_run(lab)
-                    r_lab.font.size = Pt(9)
-                    if lab.lower() != "rest":
-                        r_lab.bold = True
+                    pl = c.add_paragraph(); pl.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    pl.paragraph_format.space_after = Pt(0)
+                    rl = pl.add_run(lab); rl.font.size = Pt(9)
+                    if lab.lower() != "rest": rl.bold = True
 
-    # Thin borders for printability
-    def set_tbl_borders(tbl):
-        tbl_pr = tbl._element.tblPr
-        tbl_borders = OxmlElement('w:tblBorders')
-        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-            elem = OxmlElement(f'w:{edge}')
-            elem.set(qn('w:val'), 'single')
-            elem.set(qn('w:sz'), '4')   # 1/8 pt units
-            elem.set(qn('w:space'), '0')
-            elem.set(qn('w:color'), 'auto')
-            tbl_borders.append(elem)
-        tbl_pr.append(tbl_borders)
-
-    set_tbl_borders(table)
-
-    # Footer note (HIPAA reminder)
-    doc.add_paragraph().add_run("Note: Add patient identifiers (Name/DOB) after generating this document.").italic = True
+    # thin borders
+    tbl_pr = table._element.tblPr
+    borders = OxmlElement('w:tblBorders')
+    for edge in ('top','left','bottom','right','insideH','insideV'):
+        e = OxmlElement(f'w:{edge}'); e.set(qn('w:val'),'single'); e.set(qn('w:sz'),'4'); e.set(qn('w:space'),'0'); e.set(qn('w:color'),'auto')
+        borders.append(e)
+    tbl_pr.append(borders)
 
     doc.save(out_path)
     return True
 
-    """
-    Clinic-style DOCX:
-      - Landscape Letter, 0.5" margins
-      - Table with:
-          Row 1: merged title (3 lines)
-          Row 2: merged Name/DOB
-          Row 3: weekday header
-          Rows 4+: weeks grid
-    """
-    try:
-        from docx import Document
-        from docx.shared import Pt, Inches
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.enum.table import WD_TABLE_ALIGNMENT
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
-    except Exception:
-        return False
+# ---------------- catalog + editors ----------------
+def build_agent_catalog(bank: RegimenBank) -> Dict[str, List[Chemotherapy]]:
+    cat: Dict[str, List[Chemotherapy]] = {}
+    for rn in bank.list_regimens():
+        r = bank.get_regimen(rn)
+        if not r: continue
+        for t in r.therapies:
+            key = t.name.strip().lower()
+            cat.setdefault(key, [])
+            if not any(v.route == t.route and v.dose == t.dose and v.frequency == t.frequency and v.duration == t.duration for v in cat[key]):
+                cat[key].append(t)
+    return cat
 
-    first_sun, last_sat, max_day, grid = compute_calendar_grid(reg, start, cycle_length)
-
-    months = calendar.month_name[first_sun.month]
-    if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
-        months += f" - {calendar.month_name[last_sat.month]}"
-    title_year = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}-{last_sat.year}"
-
-    doc = Document()
-
-    # Page setup
-    section = doc.sections[0]
-    section.orientation = 1  # landscape
-    section.page_width, section.page_height = Inches(11), Inches(8.5)
-    section.left_margin = section.right_margin = section.top_margin = section.bottom_margin = Inches(0.5)
-
-    # Table structure
-    table = doc.add_table(rows=len(grid) + 3, cols=7)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = True
-
-    def merge_row_across(row_idx: int):
-        row = table.rows[row_idx]
-        first_cell = row.cells[0]
-        for j in range(1, 7):
-            first_cell.merge(row.cells[j])
-        return first_cell
-
-    # Row 0: title
-    cell_title = merge_row_across(0)
-    p = cell_title.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("Chemotherapy Calendar\n")
-    r.bold = True; r.font.size = Pt(14)
-    r2 = p.add_run(f"{reg.name}  - {cycle_label}\n")
-    r2.font.size = Pt(12)
-    r3 = p.add_run(f"{months} {title_year}")
-    r3.font.size = Pt(12)
-
-    # Row 1: Name/DOB blanks
-    cell_pid = merge_row_across(1)
-    p = cell_pid.paragraphs[0]
-    p.add_run("Patient Name: ").bold = True
-    p.add_run("__________________________    ")
-    p.add_run("DOB: ").bold = True
-    p.add_run("______________")
-
-    # Row 2: weekday headers
-    hdr = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    for i, text in enumerate(hdr):
-        cell = table.cell(2, i)
-        para = cell.paragraphs[0]
-        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = para.add_run(text)
-        run.bold = True
-        run.font.size = Pt(10)
-
-    # Body rows
-    body_row_start = 3
-    for w_i, week in enumerate(grid):
-        for d_i, cell in enumerate(week):
-            c = table.cell(body_row_start + w_i, d_i)
-            para = c.paragraphs[0]
-            r1 = para.add_run(f"{calendar.month_abbr[cell['date'].month]} {cell['date'].day}\n")
-            r1.bold = True
-            r1.font.size = Pt(9)
-            if cell["cycle_day"] is not None:
-                r2 = para.add_run(f"Day {cell['cycle_day']}\n")
-                r2.font.size = Pt(9)
-                if cell["labels"]:
-                    for lab in cell["labels"]:
-                        para.add_run(f"{lab}\n").font.size = Pt(9)
-
-    # Thin borders for printability
-    def set_tbl_borders(tbl):
-        tbl_pr = tbl._element.tblPr
-        tbl_borders = OxmlElement('w:tblBorders')
-        for edge in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-            elem = OxmlElement(f'w:{edge}')
-            elem.set(qn('w:val'), 'single')
-            elem.set(qn('w:sz'), '4')
-            elem.set(qn('w:space'), '0')
-            elem.set(qn('w:color'), 'auto')
-            tbl_borders.append(elem)
-        tbl_pr.append(tbl_borders)
-
-    set_tbl_borders(table)
-
-    # Footer note
-    doc.add_paragraph()
-    note = doc.add_paragraph()
-    note_run = note.add_run("Note: Add patient identifiers (Name/DOB) after generating this document.")
-    note_run.italic = True
-    note_run.font.size = Pt(8)
-
-    doc.save(out_path)
-    return True
-
-# ---------------- Calendar wizard ----------------
-
-def choose_cycle_or_induction() -> str:
-    """
-    Restrict choices to 'Cycle #' or 'Induction'.
-    - If user selects Cycle, prompt for a positive integer and return 'Cycle N'.
-    - If user selects Induction, return 'Induction'.
-    """
-    print("\nChoose phase label:")
-    print("  1. Cycle #")
-    print("  2. Induction")
+def choose_agent_from_catalog(cat: Dict[str, List[Chemotherapy]]) -> Optional[Chemotherapy]:
+    if not cat:
+        print("No saved agents yet."); return None
+    names = sorted(cat.keys()); disp = [n.title() for n in names]
+    print("\nChoose agent name:")
+    for i, d in enumerate(disp, 1): print(f"  {i}. {d}")
     while True:
-        sel = input("Select [1-2]: ").strip()
-        if sel == "1":
-            while True:
-                n = input("Enter cycle number (e.g., 1, 2, 3): ").strip()
-                if n.isdigit() and int(n) >= 1:
-                    return f"Cycle {int(n)}"
-                print("Please enter a positive integer.")
-        if sel == "2":
-            return "Induction"
-        print("Please choose 1 or 2.")
+        s = input("Select: ").strip()
+        if s.isdigit() and 1 <= int(s) <= len(disp):
+            key = names[int(s)-1]; vs = cat[key]
+            break
+        print("Invalid.")
+    if len(vs) == 1:
+        return replace(vs[0])
+    for i, v in enumerate(vs, 1):
+        print(f"  {i}. {v.route} | {v.dose} | {v.frequency} | {v.duration}")
+    while True:
+        s = input("Pick variant #: ").strip()
+        if s.isdigit() and 1 <= int(s) <= len(vs): return replace(vs[int(s)-1])
+        print("Invalid.")
 
-def calendar_wizard(bank: RegimenBank) -> None:
+# ---------------- unified save-or-save-as ----------------
+def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
+    """
+    Offer: 1) Save (overwrite same name), 2) Save As (new name), 3) Don't save.
+    """
+    print("\nPersist changes:")
+    print("  1. Save")
+    print("  2. Save As")
+    print("  3. Don't save")
+    while True:
+        sel = input("Select [1-3]: ").strip()
+        if sel == "1":
+            bank.upsert_regimen(reg); print(f"Saved '{reg.name}'."); return
+        if sel == "2":
+            while True:
+                new_name = input("New regimen name: ").strip()
+                if new_name:
+                    bank.save_as(reg, new_name); print(f"Saved as '{new_name}'."); return
+                print("Name required.")
+        if sel == "3":
+            print("Not saved to regimen bank."); return
+        print("Choose 1–3.")
+
+# ---------------- wizard (no scaffolds) ----------------
+def wizard(bank: RegimenBank) -> None:
+    rname, is_new = _select_regimen_with_notes(bank, "Select a regimen or add a new one:", allow_new=True)
+    if rname is None:
+        print("No regimen selected."); return
+    reg = bank.get_regimen(rname) if not is_new else Regimen(name=rname)
+    reg.disease_state = _opt("Disease state", reg.disease_state)
+    reg.notes = _opt("Regimen notes (selection aid only)", reg.notes)
+
+    while True:
+        print("\nTherapies:")
+        if not reg.therapies: print("  (none)")
+        else:
+            for i, t in enumerate(reg.therapies, 1):
+                print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
+        print("\nActions: 1) Add  2) Add from existing  3) Edit  4) Remove  5) Persist (Save / Save As)  6) Finish")
+        ch = input("Select [1-6]: ").strip()
+        if ch == "1":
+            reg.upsert_chemo(_edit_agent(Chemotherapy("", "", "", "", "")))
+        elif ch == "2":
+            tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
+            if tmpl: reg.upsert_chemo(_edit_agent(tmpl))
+        elif ch == "3":
+            if not reg.therapies: print("No agents."); continue
+            k = input("Agent # to edit: ").strip()
+            if k.isdigit() and 1 <= int(k) <= len(reg.therapies):
+                reg.therapies[int(k)-1] = _edit_agent(reg.therapies[int(k)-1])
+            else: print("Invalid.")
+        elif ch == "4":
+            if not reg.therapies: print("No agents."); continue
+            k = input("Agent # to remove: ").strip()
+            if k.isdigit() and 1 <= int(k) <= len(reg.therapies):
+                gone = reg.therapies.pop(int(k)-1); print(f"Removed {gone.name}.")
+            else: print("Invalid.")
+        elif ch == "5":
+            _persist_menu(bank, reg)
+        elif ch == "6":
+            # optional save prompt on exit
+            if input("Save before finishing? [y/N]: ").strip().lower() == "y":
+                _persist_menu(bank, reg)
+            print("Done."); return
+        else:
+            print("Choose 1–6.")
+
+# ---------------- prep editor (no notes UI; save/save-as) ----------------
+def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str]]:
+    work = Regimen(base.name, base.disease_state, base.notes, [replace(t) for t in base.therapies])
+    print("\n=== Calendar Prep Editor ===")
+    inst_note = _opt("Calendar-specific note (prints under title)")
+
+    while True:
+        print("\nTherapies:")
+        if not work.therapies: print("  (none)")
+        else:
+            for i, t in enumerate(work.therapies, 1):
+                print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
+        print("\nActions: 1) Edit  2) Add  3) Add from existing  4) Remove  5) Persist (Save / Save As)  6) Continue")
+        ch = input("Select [1-6]: ").strip()
+        if ch == "1":
+            if not work.therapies: print("No agents."); continue
+            k = input("Agent # to edit: ").strip()
+            if k.isdigit() and 1 <= int(k) <= len(work.therapies):
+                work.therapies[int(k)-1] = _edit_agent(work.therapies[int(k)-1])
+            else: print("Invalid.")
+        elif ch == "2":
+            work.upsert_chemo(_edit_agent(Chemotherapy("", "", "", "", "")))
+        elif ch == "3":
+            tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
+            if tmpl: work.upsert_chemo(_edit_agent(tmpl))
+        elif ch == "4":
+            if not work.therapies: print("No agents."); continue
+            k = input("Agent # to remove: ").strip()
+            if k.isdigit() and 1 <= int(k) <= len(work.therapies):
+                gone = work.therapies.pop(int(k)-1); print(f"Removed {gone.name}.")
+            else: print("Invalid.")
+        elif ch == "5":
+            _persist_menu(bank, work)
+        elif ch == "6":
+            break
+        else:
+            print("Choose 1–6.")
+    return work, inst_note
+
+# ---------------- labels ----------------
+def _cycle_label() -> str:
+    print("\nPhase: 1) Cycle #  2) Induction")
+    while True:
+        s = input("Select [1-2]: ").strip()
+        if s == "1":
+            while True:
+                n = input("Cycle number: ").strip()
+                if n.isdigit() and int(n) >= 1: return f"Cycle {int(n)}"
+                print("Positive integer.")
+        if s == "2": return "Induction"
+        print("Choose 1 or 2.")
+
+# ---------------- calendar flow ----------------
+def calendar_flow(bank: RegimenBank) -> None:
     names = bank.list_regimens()
     if not names:
-        print("No regimens saved yet. Launching Regimen Wizard...")
+        print("No regimens yet → launching wizard.")
         wizard(bank)
         names = bank.list_regimens()
-        if not names:
-            print("No regimens created. Exiting.")
-            return
+        if not names: print("Still empty. Exiting."); return
 
-    reg_name, _ = choose_from("Select a regimen to make a calendar for:", names, allow_new=False)
-    reg = bank.get_regimen(reg_name)
-    if not reg:
-        print(f"Regimen '{reg_name}' not found.")
-        return
+    rname, _ = _select_regimen_with_notes(bank, "Select a regimen:", allow_new=False)
+    if not rname:
+        print("No regimen selected."); return
+    base = bank.get_regimen(rname)
+    if not base:
+        print("Not found."); return
 
-    # Day 1 can be past or future
-    start = read_date("Cycle start date", default=dt.date.today())
+    reg, note = prep_editor(base, bank)
+    start = _parse_date("Cycle start date", default=dt.date.today())
 
-    # Cycle length
     while True:
         s = input("Cycle length in days [28]: ").strip()
-        if not s:
-            cycle_len = 28
-            break
-        if s.isdigit() and int(s) >= 1:
-            cycle_len = int(s)
-            break
-        print("Enter a positive integer.")
+        if not s: cycle = 28; break
+        if s.isdigit() and int(s) >= 1: cycle = int(s); break
+        print("Positive integer.")
 
-    # Strict selector: Cycle # or Induction
-    cycle_label = choose_cycle_or_induction()
+    label = _cycle_label()
 
-    # 1) Print text calendar
-    cal_txt = make_calendar_text(reg, start, cycle_len, cycle_label)
-    print("\n" + cal_txt + "\n")
+    txt = make_calendar_text(reg, start, cycle, label, note)
+    print("\n" + txt + "\n")
 
-    # 2) Save options
-    safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in reg.name)
-    default_txt = f"{safe_name}_{cycle_label.replace(' ', '').lower()}_{start.isoformat()}.txt"
-    default_docx = f"{safe_name}_{cycle_label.replace(' ', '').lower()}_{start.isoformat()}.docx"
+    safe = "".join(c if c.isalnum() or c in ("-","_") else "_" for c in reg.name)
+    basefn = f"{safe}_{label.replace(' ','').lower()}_{start.isoformat()}"
+    if input(f"Save text [{basefn}.txt]? [Y/n]: ").strip().lower() != "n":
+        Path(f"{basefn}.txt").write_text(txt, encoding="utf-8")
+        print(f"Saved {basefn}.txt")
 
-    if input(f"Save text file [{default_txt}]? [Y/n]: ").strip().lower() != "n":
-        Path(default_txt).write_text(cal_txt, encoding="utf-8")
-        print(f"Saved: {default_txt}")
-
-    want_docx = input(f"Export DOCX [{default_docx}]? [y/N]: ").strip().lower()
-    if want_docx == "y":
-        ok = export_calendar_docx(reg, start, cycle_len, Path(default_docx), cycle_label)
-        if ok:
-            print(f"Saved: {default_docx}")
-            print("Reminder: fill Patient Name and DOB in the document.")
+    if input(f"Export DOCX [{basefn}.docx]? [y/N]: ").strip().lower() == "y":
+        ok = export_calendar_docx(reg, start, cycle, Path(f"{basefn}.docx"), label, note)
+        if ok: print(f"Saved {basefn}.docx")
         else:
-            print("python-docx is not installed. In your Codespace run:  pip install python-docx")
-            print("Then re-run: python regimenbank.py calendar")
+            print("Install python-docx:  pip install python-docx")
+            print("Then re-run calendar export.")
 
 # ---------------- CLI ----------------
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="JSON-backed chemotherapy regimen bank with calendar export")
-    p.add_argument("--db", type=Path, default=DEFAULT_DB, help="Path to JSON DB (default: regimenbank.json)")
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Chemotherapy regimen bank + calendar (TXT/DOCX)")
+    p.add_argument("--db", type=Path, default=DEFAULT_DB, help="Path to regimenbank.json")
     sub = p.add_subparsers(dest="cmd", required=True)
-
-    sub.add_parser("wizard", help="Interactive guided flow: select/add regimen and agents")
-    sub.add_parser("calendar", help="Interactive calendar flow (TXT/DOCX export)")
-    sub.add_parser("list", help="List regimen names")
-
-    sp = sub.add_parser("show", help="Show a regimen")
-    sp.add_argument("--name", required=True)
-
-    sp = sub.add_parser("delete-regimen", help="Delete a regimen")
-    sp.add_argument("--name", required=True)
-
+    sub.add_parser("wizard", help="Create or edit regimens")
+    sub.add_parser("calendar", help="Prep + generate calendar")
+    sub.add_parser("list", help="List regimens")
+    sh = sub.add_parser("show", help="Show regimen"); sh.add_argument("--name", required=True)
+    dr = sub.add_parser("delete-regimen", help="Delete regimen"); dr.add_argument("--name", required=True)
     return p
 
-def pretty_print_regimen(reg: Regimen) -> None:
-    print(f"\nRegimen: {reg.name}")
-    if reg.disease_state:
-        print(f"Disease State: {reg.disease_state}")
-    if not reg.therapies:
-        print("Therapies: (none)")
-        return
-    print("Therapies:")
-    for i, t in enumerate(reg.therapies, 1):
-        print(f"  {i}. {t.name} | {t.route} | {t.dose} | "
-              f"Freq: {t.frequency} | Duration: {t.duration}")
+def _print_regimen(r: Regimen) -> None:
+    print(f"\nRegimen: {r.name}")
+    if r.disease_state: print(f"Disease State: {r.disease_state}")
+    if r.notes: print(f"Notes: {r.notes}")
+    if not r.therapies: print("Therapies: (none)")
+    else:
+        print("Therapies:")
+        for i, t in enumerate(r.therapies, 1):
+            print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
     print("")
 
 def main(argv: List[str]) -> int:
-    args = build_parser().parse_args(argv)
+    args = _parser().parse_args(argv)
     bank = RegimenBank(args.db)
-
-    if args.cmd == "wizard":
-        wizard(bank); return 0
-    if args.cmd == "calendar":
-        calendar_wizard(bank); return 0
+    if args.cmd == "wizard": wizard(bank); return 0
+    if args.cmd == "calendar": calendar_flow(bank); return 0
     if args.cmd == "list":
-        names = bank.list_regimens()
-        print("(no regimens)" if not names else "\n".join(names))
-        return 0
+        xs = bank.list_regimens()
+        print("(no regimens)" if not xs else "\n".join(xs)); return 0
     if args.cmd == "show":
-        reg = bank.get_regimen(args.name)
-        if not reg:
-            print(f"Regimen '{args.name}' not found."); return 1
-        pretty_print_regimen(reg); return 0
+        r = bank.get_regimen(args.name)
+        if not r: print("Not found."); return 1
+        _print_regimen(r); return 0
     if args.cmd == "delete-regimen":
         ok = bank.delete_regimen(args.name)
-        print("Deleted." if ok else f"Regimen '{args.name}' not found.")
-        return 0 if ok else 1
-
-    print("Unknown command."); return 1
+        print("Deleted." if ok else "Not found."); return 0 if ok else 1
+    return 1
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
