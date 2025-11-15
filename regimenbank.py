@@ -420,28 +420,67 @@ def choose_agent_from_catalog(cat: Dict[str, List[Chemotherapy]]) -> Optional[Ch
         if s.isdigit() and 1 <= int(s) <= len(vs): return replace(vs[int(s)-1])
         print("Invalid.")
 
-# ---------------- unified save-or-save-as ----------------
 def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
     """
-    Offer: 1) Save (overwrite same name), 2) Save As (new name), 3) Don't save.
+    Offer: 1) Save As (new name), 2) Save (same name), 3) Don't save.
+    Overwrites only happen if the user explicitly types 'yes'.
     """
+    exists = bank.get_regimen(reg.name) is not None
+
     print("\nPersist changes:")
-    print("  1. Save")
-    print("  2. Save As")
+    if exists:
+        print(f"  Current name '{reg.name}' already exists in regimen bank.")
+    else:
+        print(f"  Current name '{reg.name}' does not yet exist in regimen bank.")
+
+    # Keep the safe option first
+    print("  1. Save As (create NEW regimen with a new name)")
+    if exists:
+        print(f"  2. Save (OVERWRITE existing '{reg.name}')")
+    else:
+        print("  2. Save (create using current name)")
     print("  3. Don't save")
+
     while True:
         sel = input("Select [1-3]: ").strip()
         if sel == "1":
-            bank.upsert_regimen(reg); print(f"Saved '{reg.name}'."); return
-        if sel == "2":
+            # Always ask for a name for Save As
             while True:
                 new_name = input("New regimen name: ").strip()
-                if new_name:
-                    bank.save_as(reg, new_name); print(f"Saved as '{new_name}'."); return
-                print("Name required.")
-        if sel == "3":
-            print("Not saved to regimen bank."); return
-        print("Choose 1–3.")
+                if not new_name:
+                    print("Name required.")
+                    continue
+
+                new_exists = bank.get_regimen(new_name) is not None
+                if new_exists:
+                    print(f"A regimen named '{new_name}' already exists.")
+                    confirm = input("Overwrite it? Type 'yes' to confirm, or anything else to cancel: ").strip().lower()
+                    if confirm != "yes":
+                        print("Overwrite cancelled. Choose a different name.")
+                        continue
+
+                bank.save_as(reg, new_name)
+                print(f"Saved as '{new_name}'.")
+                return
+
+        elif sel == "2":
+            if exists:
+                print(f"WARNING: This will overwrite existing regimen '{reg.name}'.")
+                confirm = input("Type 'yes' to overwrite, or anything else to cancel: ").strip().lower()
+                if confirm != "yes":
+                    print("Overwrite cancelled.")
+                    continue
+            bank.upsert_regimen(reg)
+            print(f"Saved '{reg.name}'.")
+            return
+
+        elif sel == "3":
+            print("Not saved to regimen bank.")
+            return
+
+        else:
+            print("Choose 1–3.")
+
 
 # ---------------- wizard (no scaffolds) ----------------
 def wizard(bank: RegimenBank) -> None:
