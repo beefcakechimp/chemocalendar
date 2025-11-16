@@ -4,11 +4,10 @@ from __future__ import annotations
 import argparse
 import calendar as cal
 import datetime as dt
-import json
 import os
 import re
+import sqlite3
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, asdict, field, replace
 from pathlib import Path
@@ -16,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------- config ----------------
 SCHEMA_VERSION = 3
-DEFAULT_DB = Path("regimenbank.json")
+DEFAULT_DB = Path("regimenbank.db")  # now SQLite
 ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
 # ---------------- console style (notes only on selection) ----------------
@@ -70,57 +69,159 @@ class Regimen:
                 return
         self.therapies.append(c)
 
-# ---------------- storage ----------------
+# ---------------- storage (SQLite) ----------------
 class RegimenBank:
+    """
+    SQLite-backed regimen store.
+
+    Tables:
+      regimens(id, name, disease_state, notes, updated_at)
+      therapies(id, regimen_id, name, route, dose, frequency, duration)
+    """
+
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.data: Dict[str, Any] = {"_meta": {"version": SCHEMA_VERSION, "updated_at": None}, "regimens": {}}
-        self._load()
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self._init_schema()
 
-    def _load(self) -> None:
-        if not self.db_path.exists():
-            return
-        try:
-            raw = json.loads(self.db_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                return
-            raw.setdefault("_meta", {"version": SCHEMA_VERSION, "updated_at": None})
-            raw.setdefault("regimens", {})
-            self.data = raw
-        except Exception:
-            pass  # keep defaults on corruption
+    def _init_schema(self) -> None:
+        cur = self.conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS regimens (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                name          TEXT NOT NULL UNIQUE,
+                disease_state TEXT,
+                notes         TEXT,
+                updated_at    TEXT NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS therapies (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                regimen_id  INTEGER NOT NULL,
+                name        TEXT NOT NULL,
+                route       TEXT NOT NULL,
+                dose        TEXT NOT NULL,
+                frequency   TEXT NOT NULL,
+                duration    TEXT NOT NULL,
+                FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_regimens_name ON regimens(name)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_therapies_regimen ON therapies(regimen_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_therapies_name ON therapies(name)")
+        self.conn.commit()
 
-    def _save(self) -> None:
-        self.data["_meta"]["version"] = SCHEMA_VERSION
-        self.data["_meta"]["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        tmpdir = self.db_path.parent if self.db_path.parent.exists() else Path(".")
-        with tempfile.NamedTemporaryFile("w", delete=False, dir=tmpdir, suffix=".tmp", encoding="utf-8") as tf:
-            json.dump(self.data, tf, indent=2, ensure_ascii=False)
-            tmp = tf.name
-        Path(tmp).replace(self.db_path)
-
+    # ----- public API -----
     def list_regimens(self) -> List[str]:
-        return sorted(self.data.get("regimens", {}).keys())
+        cur = self.conn.execute(
+            "SELECT name FROM regimens ORDER BY name COLLATE NOCASE"
+        )
+        return [row["name"] for row in cur.fetchall()]
 
     def get_regimen(self, name: str) -> Optional[Regimen]:
-        rec = self.data.get("regimens", {}).get(name.strip())
-        return Regimen.from_dict(name.strip(), rec) if rec else None
+        name = name.strip()
+        cur = self.conn.execute(
+            "SELECT id, name, disease_state, notes FROM regimens WHERE name = ?",
+            (name,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        reg_id = row["id"]
+        cur_t = self.conn.execute(
+            "SELECT name, route, dose, frequency, duration "
+            "FROM therapies WHERE regimen_id = ? ORDER BY id",
+            (reg_id,),
+        )
+        therapies = [
+            Chemotherapy(
+                trow["name"],
+                trow["route"],
+                trow["dose"],
+                trow["frequency"],
+                trow["duration"],
+            )
+            for trow in cur_t.fetchall()
+        ]
+
+        return Regimen(
+            name=row["name"],
+            disease_state=row["disease_state"],
+            notes=row["notes"],
+            therapies=therapies,
+        )
 
     def upsert_regimen(self, reg: Regimen) -> None:
-        self.data.setdefault("regimens", {})[reg.name] = reg.to_dict()
-        self._save()
+        """
+        Insert or update a regimen and fully replace its therapies.
+        """
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self.conn:
+            # check if regimen exists
+            cur = self.conn.execute(
+                "SELECT id FROM regimens WHERE name = ?",
+                (reg.name,),
+            )
+            row = cur.fetchone()
+            if row:
+                reg_id = row["id"]
+                self.conn.execute(
+                    "UPDATE regimens "
+                    "SET disease_state = ?, notes = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (reg.disease_state, reg.notes, now, reg_id),
+                )
+                # replace therapies
+                self.conn.execute(
+                    "DELETE FROM therapies WHERE regimen_id = ?",
+                    (reg_id,),
+                )
+            else:
+                self.conn.execute(
+                    "INSERT INTO regimens(name, disease_state, notes, updated_at) "
+                    "VALUES(?, ?, ?, ?)",
+                    (reg.name, reg.disease_state, reg.notes, now),
+                )
+                reg_id = self.conn.execute(
+                    "SELECT id FROM regimens WHERE name = ?",
+                    (reg.name,),
+                ).fetchone()["id"]
+
+            # insert therapies
+            for t in reg.therapies:
+                self.conn.execute(
+                    "INSERT INTO therapies(regimen_id, name, route, dose, frequency, duration) "
+                    "VALUES(?, ?, ?, ?, ?, ?)",
+                    (
+                        reg_id,
+                        t.name,
+                        t.route,
+                        t.dose,
+                        t.frequency,
+                        t.duration,
+                    ),
+                )
 
     def delete_regimen(self, name: str) -> bool:
-        regs = self.data.get("regimens", {})
-        if name in regs:
-            del regs[name]
-            self._save()
-            return True
-        return False
+        with self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM regimens WHERE name = ?",
+                (name.strip(),),
+            )
+            return cur.rowcount > 0
 
     def save_as(self, reg: Regimen, new_name: str) -> None:
         r2 = replace(reg, name=new_name)
         self.upsert_regimen(r2)
+
+    def close(self) -> None:
+        try:
+            self.conn.close()
+        except Exception:
+            pass
 
 # ---------------- small IO helpers ----------------
 def _choose(prompt: str, options: List[str], allow_new=False) -> Tuple[str, bool]:
@@ -265,6 +366,7 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
         grid.append(week)
     return first_sun, last_sat, max_day, grid
 
+
 def make_calendar_text(reg: Regimen, start: dt.date, cycle_len: int, cycle_label: str, note: Optional[str] = None) -> str:
     first_sun, last_sat, _, grid = compute_calendar_grid(reg, start, cycle_len)
     months = cal.month_name[first_sun.month]
@@ -319,22 +421,50 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     sec.page_width, sec.page_height = Inches(11), Inches(8.5)
     sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    # header (logo + name/dob)
+           # ----- HEADER (logo right, name/DOB left on separate lines) -----
     hdr = sec.header
-    htbl = hdr.add_table(rows=1, cols=2)
-    htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    left = htbl.cell(0, 0).paragraphs[0]
-    right = htbl.cell(0, 1).paragraphs[0]
-    logo = Path("ucmlogo.png")
+
+    # python-docx compatibility: some versions require width argument
     try:
-        if logo.exists():
-            left.add_run().add_picture(str(logo), height=Inches(0.6))
-    except Exception:
-        pass
-    right.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    rh = right.add_run("Name: ______________________    DOB: ____________")
-    rh.italic = True; rh.font.size = Pt(10)
-    doc.add_paragraph()  # spacer
+        htbl = hdr.add_table(rows=1, cols=2, width=sec.page_width)
+    except TypeError:
+        htbl = hdr.add_table(rows=1, cols=2)
+
+    htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # -------- Left cell: Name and DOB --------
+    left_cell = htbl.cell(0, 0)
+    left_cell.text = ""  # clear default paragraph
+
+    # Name line
+    p_name = left_cell.add_paragraph()
+    p_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run_name = p_name.add_run("First, Last")
+    run_name.italic = True
+    run_name.font.size = Pt(10)
+
+    # DOB line
+    p_dob = left_cell.add_paragraph()
+    p_dob.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run_dob = p_dob.add_run("MM/DD/YYYY")
+    run_dob.italic = True
+    run_dob.font.size = Pt(10)
+
+    # Remove the original empty paragraph Word inserts by default
+    left_cell._element.remove(left_cell.paragraphs[0]._element)
+
+    # -------- Right cell: UCM Logo --------
+    right_p = htbl.cell(0, 1).paragraphs[0]
+    right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    logo = Path("ucm.png")
+    if logo.exists():
+        try:
+            right_p.add_run().add_picture(str(logo), height=Inches(0.6))
+        except Exception as e:
+            print(f"[WARN] Could not insert logo: {e}")
+
+
 
     # title + table
     table = doc.add_table(rows=len(grid) + 2, cols=7)
@@ -420,6 +550,7 @@ def choose_agent_from_catalog(cat: Dict[str, List[Chemotherapy]]) -> Optional[Ch
         if s.isdigit() and 1 <= int(s) <= len(vs): return replace(vs[int(s)-1])
         print("Invalid.")
 
+# ---------------- unified save-or-save-as ----------------
 def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
     """
     Offer: 1) Save As (new name), 2) Save (same name), 3) Don't save.
@@ -481,13 +612,20 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
         else:
             print("Choose 1–3.")
 
-
 # ---------------- wizard (no scaffolds) ----------------
 def wizard(bank: RegimenBank) -> None:
     rname, is_new = _select_regimen_with_notes(bank, "Select a regimen or add a new one:", allow_new=True)
     if rname is None:
         print("No regimen selected."); return
     reg = bank.get_regimen(rname) if not is_new else Regimen(name=rname)
+
+    if is_new or reg is None:
+        print(f"\nCreating NEW regimen '{rname}'.")
+        reg = reg or Regimen(name=rname)
+    else:
+        print(f"\nEditing EXISTING regimen '{rname}'.")
+        print("Hint: Use 'Persist → Save As' if you want to create a new regimen (e.g., 7+3 → 7+3+ven).")
+
     reg.disease_state = _opt("Disease state", reg.disease_state)
     reg.notes = _opt("Regimen notes (selection aid only)", reg.notes)
 
@@ -519,7 +657,6 @@ def wizard(bank: RegimenBank) -> None:
         elif ch == "5":
             _persist_menu(bank, reg)
         elif ch == "6":
-            # optional save prompt on exit
             if input("Save before finishing? [y/N]: ").strip().lower() == "y":
                 _persist_menu(bank, reg)
             print("Done."); return
@@ -528,42 +665,99 @@ def wizard(bank: RegimenBank) -> None:
 
 # ---------------- prep editor (no notes UI; save/save-as) ----------------
 def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str]]:
-    work = Regimen(base.name, base.disease_state, base.notes, [replace(t) for t in base.therapies])
-    print("\n=== Calendar Prep Editor ===")
-    inst_note = _opt("Calendar-specific note (prints under title)")
+    # Work on a copy so we never mutate the base regimen directly
+    work = Regimen(
+        base.name,
+        base.disease_state,
+        base.notes,
+        [replace(t) for t in base.therapies],
+    )
+    print(f"\n=== Calendar Prep Editor for '{work.name}' ===")
+    # No calendar-specific note prompt anymore
+    inst_note: Optional[str] = None
 
     while True:
         print("\nTherapies:")
-        if not work.therapies: print("  (none)")
+        if not work.therapies:
+            print("  (none)")
         else:
             for i, t in enumerate(work.therapies, 1):
                 print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
-        print("\nActions: 1) Edit  2) Add  3) Add from existing  4) Remove  5) Persist (Save / Save As)  6) Continue")
-        ch = input("Select [1-6]: ").strip()
-        if ch == "1":
-            if not work.therapies: print("No agents."); continue
-            k = input("Agent # to edit: ").strip()
-            if k.isdigit() and 1 <= int(k) <= len(work.therapies):
-                work.therapies[int(k)-1] = _edit_agent(work.therapies[int(k)-1])
-            else: print("Invalid.")
-        elif ch == "2":
-            work.upsert_chemo(_edit_agent(Chemotherapy("", "", "", "", "")))
-        elif ch == "3":
-            tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
-            if tmpl: work.upsert_chemo(_edit_agent(tmpl))
-        elif ch == "4":
-            if not work.therapies: print("No agents."); continue
-            k = input("Agent # to remove: ").strip()
-            if k.isdigit() and 1 <= int(k) <= len(work.therapies):
-                gone = work.therapies.pop(int(k)-1); print(f"Removed {gone.name}.")
-            else: print("Invalid.")
-        elif ch == "5":
-            _persist_menu(bank, work)
-        elif ch == "6":
-            break
-        else:
-            print("Choose 1–6.")
-    return work, inst_note
+
+        choice = input(
+            "\nPress Enter to continue with this calendar copy, "
+            "or type 'e' to edit: "
+        ).strip().lower()
+
+        if choice == "":
+            # Just use the regimen as-is for this calendar; no edits, no save prompts
+            return work, inst_note
+
+        if choice not in {"e", "1"}:
+            print("Type 'e' to edit, or just press Enter to continue.")
+            continue
+
+        # --- Edit sub-menu ---
+        changed = False
+        while True:
+            print("\nEdit actions:")
+            print("  1) Edit existing agent")
+            print("  2) Add new agent")
+            print("  3) Add from existing catalog")
+            print("  4) Remove agent")
+            print("  5) Done editing")
+
+            ch = input("Select [1-5] (or press Enter for 'Done editing'): ").strip()
+
+            if ch == "" or ch == "5":
+                break
+
+            elif ch == "1":
+                if not work.therapies:
+                    print("No agents to edit.")
+                    continue
+                k = input("Agent # to edit: ").strip()
+                if k.isdigit() and 1 <= int(k) <= len(work.therapies):
+                    work.therapies[int(k) - 1] = _edit_agent(work.therapies[int(k) - 1])
+                    changed = True
+                else:
+                    print("Invalid.")
+
+            elif ch == "2":
+                work.upsert_chemo(_edit_agent(Chemotherapy("", "", "", "", "")))
+                changed = True
+
+            elif ch == "3":
+                tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
+                if tmpl:
+                    work.upsert_chemo(_edit_agent(tmpl))
+                    changed = True
+
+            elif ch == "4":
+                if not work.therapies:
+                    print("No agents to remove.")
+                    continue
+                k = input("Agent # to remove: ").strip()
+                if k.isdigit() and 1 <= int(k) <= len(work.therapies):
+                    gone = work.therapies.pop(int(k) - 1)
+                    print(f"Removed {gone.name}.")
+                    changed = True
+                else:
+                    print("Invalid.")
+
+            else:
+                print("Choose 1–5.")
+
+        # After editing session, optionally persist back to regimen bank
+        if changed:
+            ans = input(
+                "Save these edits back to the regimen bank (Save / Save As)? [y/N]: "
+            ).strip().lower()
+            if ans == "y":
+                _persist_menu(bank, work)
+
+        # Either way, we now use this edited copy for the calendar
+            return work, inst_note
 
 # ---------------- labels ----------------
 def _cycle_label() -> str:
@@ -624,7 +818,7 @@ def calendar_flow(bank: RegimenBank) -> None:
 # ---------------- CLI ----------------
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Chemotherapy regimen bank + calendar (TXT/DOCX)")
-    p.add_argument("--db", type=Path, default=DEFAULT_DB, help="Path to regimenbank.json")
+    p.add_argument("--db", type=Path, default=DEFAULT_DB, help="Path to regimenbank.db (SQLite)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("wizard", help="Create or edit regimens")
     sub.add_parser("calendar", help="Prep + generate calendar")
@@ -647,19 +841,24 @@ def _print_regimen(r: Regimen) -> None:
 def main(argv: List[str]) -> int:
     args = _parser().parse_args(argv)
     bank = RegimenBank(args.db)
-    if args.cmd == "wizard": wizard(bank); return 0
-    if args.cmd == "calendar": calendar_flow(bank); return 0
-    if args.cmd == "list":
-        xs = bank.list_regimens()
-        print("(no regimens)" if not xs else "\n".join(xs)); return 0
-    if args.cmd == "show":
-        r = bank.get_regimen(args.name)
-        if not r: print("Not found."); return 1
-        _print_regimen(r); return 0
-    if args.cmd == "delete-regimen":
-        ok = bank.delete_regimen(args.name)
-        print("Deleted." if ok else "Not found."); return 0 if ok else 1
-    return 1
+    try:
+        if args.cmd == "wizard":
+            wizard(bank); return 0
+        if args.cmd == "calendar":
+            calendar_flow(bank); return 0
+        if args.cmd == "list":
+            xs = bank.list_regimens()
+            print("(no regimens)" if not xs else "\n".join(xs)); return 0
+        if args.cmd == "show":
+            r = bank.get_regimen(args.name)
+            if not r: print("Not found."); return 1
+            _print_regimen(r); return 0
+        if args.cmd == "delete-regimen":
+            ok = bank.delete_regimen(args.name)
+            print("Deleted." if ok else "Not found."); return 0 if ok else 1
+        return 1
+    finally:
+        bank.close()
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
