@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------- config ----------------
 SCHEMA_VERSION = 3
-DEFAULT_DB = Path("regimenbank.db")  # now SQLite
+DEFAULT_DB = Path("regimenbank.db") 
 ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
 # ---------------- console style (notes only on selection) ----------------
@@ -304,31 +304,51 @@ def _select_regimen_with_notes(bank: RegimenBank, title: str, allow_new=False) -
 
 # ---------------- day-map parsing ----------------
 def parse_day_spec(day_spec: str) -> List[int]:
-    """Parse a 'Days ...' string into explicit day numbers."""
+    """
+    Parse a day specification into explicit day numbers.
+
+    Accepts flexible formats like:
+      - 'Days 1-7'
+      - 'Day 1-7'
+      - 'Days: 1-3, 5, 7-9'
+      - '1-7'
+      - '1, 4, 8'
+    """
     if not day_spec:
         return []
+
     s = day_spec.replace("–", "-").strip().lower()
-    m = re.search(r"^days\s+(.+)$", s)
-    if not m:
+
+    # Strip leading 'day' / 'days' and optional punctuation
+    # e.g. "days 1-7" -> "1-7", "day: 1-3, 5" -> "1-3, 5"
+    s = re.sub(r"^days?\s*[:\-]?\s*", "", s)
+
+    if not s:
         return []
-    tokens = re.split(r"[,\s]+", m.group(1))
+
+    tokens = re.split(r"[,\s]+", s)
     out: List[int] = []
+
     for tok in tokens:
         if not tok:
             continue
         if "-" in tok:
             try:
-                a, b = map(int, tok.split("-", 1))
+                a_str, b_str = tok.split("-", 1)
+                a, b = int(a_str), int(b_str)
                 if a <= b:
                     out.extend(range(a, b + 1))
             except ValueError:
-                pass
+                # Skip malformed segments instead of killing everything
+                continue
         else:
             try:
                 out.append(int(tok))
             except ValueError:
-                pass
+                continue
+
     return sorted(set(d for d in out if d >= 1))
+
 
 # ---------------- grid + exports ----------------
 def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
@@ -397,6 +417,17 @@ def make_calendar_text(reg: Regimen, start: dt.date, cycle_len: int, cycle_label
             lines.append(" ".join(row))
         lines.append("")
     return "\n".join(lines)
+
+def _spell_route(route: str) -> str:
+    r = route.strip().upper()
+    mapping = {
+        "PO": "by mouth",
+        "IV": "intravenously",
+        "SQ": "subcutanously",
+        "IT": "intrathecally. Given during lumbar puncture",
+    }
+    return mapping.get(r, route)  # fall back to raw text if unknown
+
 
 def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path: Path, cycle_label: str, note: Optional[str] = None) -> bool:
     try:
@@ -505,13 +536,49 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
                     rl = pl.add_run(lab); rl.font.size = Pt(9)
                     if lab.lower() != "rest": rl.bold = True
 
-    # thin borders
+          # thin borders
     tbl_pr = table._element.tblPr
     borders = OxmlElement('w:tblBorders')
     for edge in ('top','left','bottom','right','insideH','insideV'):
-        e = OxmlElement(f'w:{edge}'); e.set(qn('w:val'),'single'); e.set(qn('w:sz'),'4'); e.set(qn('w:space'),'0'); e.set(qn('w:color'),'auto')
+        e = OxmlElement(f'w:{edge}')
+        e.set(qn('w:val'), 'single')
+        e.set(qn('w:sz'), '4')
+        e.set(qn('w:space'), '0')
+        e.set(qn('w:color'), 'auto')
         borders.append(e)
     tbl_pr.append(borders)
+
+    # ----- Patient-friendly bullets below calendar -----
+    doc.add_paragraph()  # spacing after table
+
+    for t in reg.therapies:
+        # Route phrase
+        route_phrase = _spell_route(t.route)
+
+        # Verb based on route
+        verb = "Take" if t.route.strip().upper() == "PO" else "Receive"
+
+        freq_text = t.frequency.strip()          # use EXACT frequency from DB
+        dur_text = t.duration.strip()            # use EXACT duration from DB
+
+        # Count total doses
+        day_list = parse_day_spec(t.duration)
+        total_doses = len(day_list)
+
+        # Build bullet sentence
+        # Example: "Dexamethasone: Take by mouth once daily on Days 1–7 and Days 15–21 (total 14 doses)."
+        sentence = (
+            f"{t.name}: "
+            f"{verb} {route_phrase} "
+            f"{freq_text} "
+            f"on {dur_text} "
+            f"(total {total_doses} dose{'s' if total_doses != 1 else ''})."
+        )
+
+        p = doc.add_paragraph(style="List Bullet")
+        run = p.add_run(sentence)
+        run.font.size = Pt(10)
+
 
     doc.save(out_path)
     return True
@@ -755,9 +822,7 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
             ).strip().lower()
             if ans == "y":
                 _persist_menu(bank, work)
-
-        # Either way, we now use this edited copy for the calendar
-            return work, inst_note
+        return work, inst_note
 
 # ---------------- labels ----------------
 def _cycle_label() -> str:
