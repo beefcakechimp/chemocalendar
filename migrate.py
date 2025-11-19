@@ -6,8 +6,8 @@ import time
 from pathlib import Path
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    cur = conn.cursor()
+def init_schema(self) -> None:
+    cur = self.conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS regimens (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,13 +26,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
             dose        TEXT NOT NULL,
             frequency   TEXT NOT NULL,
             duration    TEXT NOT NULL,
+            total_doses INTEGER,
             FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE
         )
     """)
+
+    # schema migration for older DBs missing total_doses
+    try:
+        cur.execute("ALTER TABLE therapies ADD COLUMN total_doses INTEGER")
+    except Exception:
+        # column already exists or other harmless error
+        pass
+
     cur.execute("CREATE INDEX IF NOT EXISTS idx_regimens_name ON regimens(name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_therapies_regimen ON therapies(regimen_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_therapies_name ON therapies(name)")
-    conn.commit()
+    self.conn.commit()
+
 
 
 def migrate(json_path: Path, db_path: Path) -> None:
