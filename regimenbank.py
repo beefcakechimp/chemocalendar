@@ -555,6 +555,13 @@ def export_calendar_docx(
     )
 
     doc = Document()
+    # Set default document font to Calibri
+    style = doc.styles['Normal']
+    style.font.name = 'Calibri'
+    style._element.rPr.rFonts.set(qn('w:ascii'), 'Calibri')
+    style._element.rPr.rFonts.set(qn('w:hAnsi'), 'Calibri')
+    style.font.size = Pt(12)   # optional default size
+
     sec = doc.sections[0]
 
     # Page layout: landscape, 0.5" margins
@@ -564,33 +571,72 @@ def export_calendar_docx(
         0.5
     )
 
-    # -------- Calendar table (title row + weekday header + weeks) --------
-    rows = len(grid) + 2  # 0: title row, 1: weekday header, 2+ weeks
+    # ---------- HEADER: Name/DOB left, logo right ----------
+    hdr = sec.header
+    try:
+        htbl = hdr.add_table(rows=1, cols=2, width=sec.page_width)
+    except TypeError:
+        htbl = hdr.add_table(rows=1, cols=2)
+    htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # Left cell: name + DOB, italic, small
+    left_cell = htbl.cell(0, 0)
+    left_cell.text = ""
+
+    p_name = left_cell.add_paragraph()
+    p_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_name.paragraph_format.space_before = Pt(0)
+    p_name.paragraph_format.space_after = Pt(0)
+    r_name = p_name.add_run("First Last")
+    r_name.italic = True
+    r_name.font.size = Pt(10)
+
+    p_dob = left_cell.add_paragraph()
+    p_dob.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_dob.paragraph_format.space_before = Pt(0)
+    p_dob.paragraph_format.space_after = Pt(0)
+    r_dob = p_dob.add_run("DOB: M/DD/YYYY")
+    r_dob.italic = True
+    r_dob.font.size = Pt(10)
+
+    # remove any default empty paragraph if present
+    if left_cell.paragraphs and left_cell.paragraphs[0].text == "":
+        try:
+            left_cell._element.remove(left_cell.paragraphs[0]._element)
+        except Exception:
+            pass
+
+    # Right cell: UCM logo aligned right (if present)
+    right_cell = htbl.cell(0, 1)
+    right_p = right_cell.paragraphs[0]
+    right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    logo = Path("ucm.png")
+    if logo.exists():
+        try:
+            right_p.add_run().add_picture(str(logo), height=Inches(0.76))
+        except Exception as e:
+            print(f"[WARN] Could not insert logo: {e}")
+
+    # ---------- CALENDAR TABLE ----------
+    rows = len(grid) + 2  # row 0 = title; row 1 = weekday header
     cols = 7
     table = doc.add_table(rows=rows, cols=cols)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = True
 
-    # Approximate uniform column widths
-    total_width = sec.page_width - sec.left_margin - sec.right_margin
-    col_width = float(total_width / cols)
-
-    for col in table.columns:
-        col.width = Inches(col_width)
-
     # ----- Row 0: merged title row -----
     title_row = table.rows[0]
     title_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    title_row.height = Inches(0.72)  # close to your sample
+    title_row.height = Inches(0.72)
 
-    # merge all cells in row 0
     first_cell = title_row.cells[0]
     for j in range(1, cols):
         first_cell.merge(title_row.cells[j])
     c = first_cell
-    c.text = ""  # clear any default text
+    c.text = ""
 
-    # Paragraph 1: "Chemotherapy Calendar" (14 pt, bold, centered)
+    # Line 1: "Chemotherapy Calendar"
     p1 = c.paragraphs[0]
     p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p1.paragraph_format.space_before = Pt(0)
@@ -599,30 +645,28 @@ def export_calendar_docx(
     r1.bold = True
     r1.font.size = Pt(14)
 
-    # Paragraph 2: regimen name + " - Cycle X" (12 pt; cycle bold)
+    # Line 2: regimen name - Cycle X   (cycle bold)
     p2 = c.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p2.paragraph_format.space_before = Pt(0)
     p2.paragraph_format.space_after = Pt(0)
 
-    # regimen name (regular)
     r2a = p2.add_run(reg.name + " - ")
-    r2a.font.size = Pt(12)
+    r2a.font.size = Pt(14)
 
-    # cycle label (bold)
     r2b = p2.add_run(cycle_label)
     r2b.bold = True
-    r2b.font.size = Pt(12)
+    r2b.font.size = Pt(14)
 
-    # Paragraph 3: month range (12 pt)
+    # Line 3: month/year range
     p3 = c.add_paragraph()
     p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p3.paragraph_format.space_before = Pt(0)
     p3.paragraph_format.space_after = Pt(0)
     r3 = p3.add_run(f"{months} {year}")
-    r3.font.size = Pt(12)
+    r3.font.size = Pt(14)
 
-    # Optional note line below (still inside merged cell)
+    # Optional note line
     if note:
         p4 = c.add_paragraph()
         p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -632,7 +676,7 @@ def export_calendar_docx(
         r4.italic = True
         r4.font.size = Pt(11)
 
-    # ----- Row 1: weekday header row -----
+    # ----- Row 1: weekday header row (black with white text) -----
     header_names = [
         "Sunday",
         "Monday",
@@ -644,7 +688,7 @@ def export_calendar_docx(
     ]
     header_row = table.rows[1]
     header_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    header_row.height = Inches(0.10)  # short header band
+    header_row.height = Inches(0.10)
 
     for i, dname in enumerate(header_names):
         cell = header_row.cells[i]
@@ -655,72 +699,73 @@ def export_calendar_docx(
         p.paragraph_format.space_after = Pt(0)
         r = p.add_run(dname)
         r.bold = True
-        r.font.size = Pt(12)
-        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)  # white text
+        r.font.size = Pt(14)
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
-        # black shading for header row
+        # black shading
         tcPr = cell._tc.get_or_add_tcPr()
         shd = OxmlElement("w:shd")
         shd.set(qn("w:val"), "clear")
         shd.set(qn("w:color"), "auto")
-        shd.set(qn("w:fill"), "000000")  # black
+        shd.set(qn("w:fill"), "000000")
         tcPr.append(shd)
 
     # ----- Rows 2+: calendar weeks -----
     for wi, week in enumerate(grid):
         row = table.rows[wi + 2]
         row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-        row.height = Inches(1.0)  # similar to your sample week row height
+        row.height = Inches(1.0)
 
         for di, cell_data in enumerate(week):
             cell = row.cells[di]
             cell.text = ""
-            # Date line
+
+            # Date – right aligned
             p_date = cell.paragraphs[0]
-            p_date.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p_date.paragraph_format.space_before = Pt(0)
             p_date.paragraph_format.space_after = Pt(0)
             rd = p_date.add_run(
                 f"{cal.month_abbr[cell_data['date'].month]} {cell_data['date'].day}"
             )
             rd.bold = True
-            rd.font.size = Pt(12)
+            rd.font.size = Pt(14)
 
             if cell_data["cycle_day"] is not None:
-                # Day line
+                # "Day X" – left aligned
                 p_day = cell.add_paragraph()
                 p_day.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 p_day.paragraph_format.space_before = Pt(0)
                 p_day.paragraph_format.space_after = Pt(0)
                 rday = p_day.add_run(f"Day {cell_data['cycle_day']}")
                 rday.italic = True
-                rday.font.size = Pt(12)
+                rday.font.size = Pt(14)
 
-                # Labels (medications)
+                # Med labels – left aligned, bold when not "rest"
                 for lab in cell_data["labels"]:
                     p_lab = cell.add_paragraph()
                     p_lab.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     p_lab.paragraph_format.space_before = Pt(0)
                     p_lab.paragraph_format.space_after = Pt(0)
                     rl = p_lab.add_run(lab)
-                    rl.font.size = Pt(12)
+                    rl.font.size = Pt(14)
                     if lab.lower() != "rest":
                         rl.bold = True
 
-    # ----- Table borders (thin, like sample) -----
+    # ----- Table borders (thin) -----
     tbl_pr = table._element.tblPr
     borders = OxmlElement("w:tblBorders")
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         e = OxmlElement(f"w:{edge}")
         e.set(qn("w:val"), "single")
-        e.set(qn("w:sz"), "4")      # thin line
+        e.set(qn("w:sz"), "4")
         e.set(qn("w:space"), "0")
         e.set(qn("w:color"), "auto")
         borders.append(e)
     tbl_pr.append(borders)
 
-    # ----- Patient-friendly bullets below calendar -----
-    doc.add_paragraph()  # spacing after table
+    # ---------- Patient-friendly bullets below calendar ----------
+    doc.add_paragraph()
 
     for t in reg.therapies:
         route_phrase = _spell_route(t.route)
@@ -729,7 +774,6 @@ def export_calendar_docx(
         freq_text = t.frequency.strip()
         dur_text = t.duration.strip()
 
-        # Prefer stored total_doses, fall back to parsed days
         if t.total_doses is not None:
             total_doses = t.total_doses
         else:
@@ -750,6 +794,7 @@ def export_calendar_docx(
 
     doc.save(out_path)
     return True
+
 
 
 # ---------------- catalog + editors ----------------
