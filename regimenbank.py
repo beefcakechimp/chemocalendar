@@ -521,7 +521,7 @@ def _spell_route(route: str) -> str:
         "PO": "by mouth",
         "IV": "intravenously",
         "SQ": "subcutanously",
-        "IT": "intrathecally. Given during lumbar puncture",
+        "IT": "Given during lumbar puncture",
     }
     return mapping.get(r, route)  # fall back to raw text if unknown
 
@@ -537,7 +537,7 @@ def export_calendar_docx(
     try:
         from docx import Document
         from docx.shared import Pt, Inches, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
         from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
@@ -560,7 +560,12 @@ def export_calendar_docx(
     style.font.name = 'Calibri'
     style._element.rPr.rFonts.set(qn('w:ascii'), 'Calibri')
     style._element.rPr.rFonts.set(qn('w:hAnsi'), 'Calibri')
-    style.font.size = Pt(12)   # optional default size
+    style.font.size = Pt(12) 
+     # Single spacing, no extra space before/after for Normal style
+    pf = style.paragraph_format
+    pf.space_before = Pt(0)
+    pf.space_after = Pt(0)
+    pf.line_spacing_rule = WD_LINE_SPACING.SINGLE
 
     sec = doc.sections[0]
 
