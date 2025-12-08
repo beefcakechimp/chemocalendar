@@ -327,7 +327,6 @@ def _edit_agent(base: Chemotherapy) -> Chemotherapy:
         base.duration,
     )
 
-    # ------ NEW: optional total_doses override ------
     # Show existing total_doses if present
     td_default = "" if base.total_doses is None else str(base.total_doses)
     td_raw = input(
@@ -347,7 +346,7 @@ def _edit_agent(base: Chemotherapy) -> Chemotherapy:
         try:
             td_val = int(td_raw)
         except ValueError:
-            print("Could not parse total doses as an integer; will auto-calc from duration.")
+            print("error; will auto-calc from duration.")
             td_val = None
 
     return Chemotherapy(name, route, dose, frequency, duration, td_val)
@@ -382,7 +381,7 @@ def _select_regimen_with_notes(
                 return val, True
         if sel in index_map:
             return index_map[sel], False
-        print("Invalid. Try again.")
+        print("Invalid")
 
 
 # ---------------- day-map parsing ----------------
@@ -519,8 +518,8 @@ def _spell_route(route: str) -> str:
     r = route.strip().upper()
     mapping = {
         "PO": "by mouth",
-        "IV": "intravenously",
-        "SQ": "subcutanously",
+        "IV": "Given intravenously",
+        "SQ": "Inject SubQ",
         "IT": "Given during lumbar puncture",
     }
     return mapping.get(r, route)  # fall back to raw text if unknown
@@ -594,7 +593,7 @@ def export_calendar_docx(
     p_name.paragraph_format.space_after = Pt(0)
     r_name = p_name.add_run("First Last")
     r_name.italic = True
-    r_name.font.size = Pt(10)
+    r_name.font.size = Pt(12)
 
     p_dob = left_cell.add_paragraph()
     p_dob.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -602,7 +601,7 @@ def export_calendar_docx(
     p_dob.paragraph_format.space_after = Pt(0)
     r_dob = p_dob.add_run("DOB: M/DD/YYYY")
     r_dob.italic = True
-    r_dob.font.size = Pt(10)
+    r_dob.font.size = Pt(12)
 
     # remove any default empty paragraph if present
     if left_cell.paragraphs and left_cell.paragraphs[0].text == "":
@@ -795,7 +794,7 @@ def export_calendar_docx(
 
         p = doc.add_paragraph(style="List Bullet")
         run = p.add_run(sentence)
-        run.font.size = Pt(11)
+        run.font.size = Pt(12)
 
     doc.save(out_path)
     return True
@@ -865,11 +864,11 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
         print(f"  Current name '{reg.name}' does not yet exist in regimen bank.")
 
     # Keep the safe option first
-    print("  1. Save As (create NEW regimen with a new name)")
+    print("  1. Save As (create NEW regimen)")
     if exists:
         print(f"  2. Save (OVERWRITE existing '{reg.name}')")
     else:
-        print("  2. Save (create using current name)")
+        print("  2. Save (create NEW regimen)")
     print("  3. Don't save")
 
     while True:
@@ -917,7 +916,7 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
             print("Choose 1–3.")
 
 
-# ---------------- wizard (no scaffolds) ----------------
+# ---------------- wizard ----------------
 def wizard(bank: RegimenBank) -> None:
     rname, is_new = _select_regimen_with_notes(
         bank, "Select a regimen or add a new one:", allow_new=True
@@ -1014,7 +1013,7 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
                 )
 
         choice = input(
-            "\nPress Enter to continue with this calendar copy, "
+            "\nPress Enter to continue"
             "or type 'e' to edit: "
         ).strip().lower()
 
@@ -1083,7 +1082,7 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
         # After editing session, optionally persist back to regimen bank
         if changed:
             ans = input(
-                "Save these edits back to the regimen bank (Save / Save As)? [y/N]: "
+                "Save edits? (Save or Save As)? [y/N]: "
             ).strip().lower()
             if ans == "y":
                 _persist_menu(bank, work)
