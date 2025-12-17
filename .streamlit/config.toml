@@ -1,0 +1,27 @@
+[theme]
+base = "light"
+
+# Elegant body + clean code font (Streamlit >= 1.50.0)
+font = "Nunito:https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,300..900;1,300..900, sans-serif"
+codeFont = "'Space Mono':https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap, monospace"
+
+# Clean clinical palette
+primaryColor = "#2B6CB0"                 # strong but not loud
+backgroundColor = "#F7F8FA"              # app background
+secondaryBackgroundColor = "#FFFFFF"     # cards / panels
+textColor = "#1F2937"                    # slate-800
+linkColor = "#2B6CB0"
+linkUnderline = false
+
+# Borders + radii to make widgets feel “designed”
+borderColor = "#E5E7EB"
+showWidgetBorder = true
+baseRadius = 10
+buttonRadius = 999
+
+[theme.sidebar]
+backgroundColor = "#0F172A"              # deep slate
+secondaryBackgroundColor = "#111C33"
+textColor = "#E5E7EB"
+primaryColor = "#60A5FA"
+showWidgetBorder = false
