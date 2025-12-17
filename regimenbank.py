@@ -55,7 +55,8 @@ class Chemotherapy:
 class Regimen:
     name: str
     disease_state: Optional[str] = None
-    notes: Optional[str] = None  # stored; shown only on selection screen
+    on_study: bool = False          # NEW: off protocol by default
+    notes: Optional[str] = None     # stored; shown only on selection screen
     therapies: List[Chemotherapy] = field(default_factory=list)
 
     @staticmethod
@@ -63,6 +64,7 @@ class Regimen:
         return Regimen(
             name=name,
             disease_state=d.get("disease_state"),
+            on_study=d.get("on_study", False),
             notes=d.get("notes"),
             therapies=[Chemotherapy.from_dict(x) for x in d.get("therapies", [])],
         )
@@ -70,6 +72,7 @@ class Regimen:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "disease_state": self.disease_state,
+            "on_study": self.on_study,
             "notes": self.notes,
             "therapies": [asdict(t) for t in self.therapies],
         }
@@ -81,6 +84,7 @@ class Regimen:
                 self.therapies[i] = c
                 return
         self.therapies.append(c)
+
 
 
 # ---------------- storage (SQLite) ----------------
@@ -112,6 +116,7 @@ class RegimenBank:
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 name          TEXT NOT NULL UNIQUE,
                 disease_state TEXT,
+                on_study      INTEGER NOT NULL DEFAULT 0,  -- 0 = off protocol, 1 = on study
                 notes         TEXT,
                 updated_at    TEXT NOT NULL
             )
@@ -133,13 +138,23 @@ class RegimenBank:
         """
         )
 
-        # --- lightweight migration: ensure total_doses exists ---
+        # --- lightweight migration: ensure on_study exists on regimens ---
+        cur.execute("PRAGMA table_info(regimens)")
+        rcols = [row["name"] for row in cur.fetchall()]
+        if "on_study" not in rcols:
+            cur.execute(
+                "ALTER TABLE regimens "
+                "ADD COLUMN on_study INTEGER NOT NULL DEFAULT 0"
+            )
+
+        # --- lightweight migration: ensure total_doses exists on therapies ---
         cur.execute("PRAGMA table_info(therapies)")
         cols = [row["name"] for row in cur.fetchall()]
         if "total_doses" not in cols:
             cur.execute("ALTER TABLE therapies ADD COLUMN total_doses INTEGER")
 
         self.conn.commit()
+
 
     # ----- public API -----
     def list_regimens(self) -> List[str]:
@@ -151,7 +166,8 @@ class RegimenBank:
     def get_regimen(self, name: str) -> Optional[Regimen]:
         name = name.strip()
         cur = self.conn.execute(
-            "SELECT id, name, disease_state, notes FROM regimens WHERE name = ?",
+            "SELECT id, name, disease_state, notes, on_study "
+            "FROM regimens WHERE name = ?",
             (name,),
         )
         row = cur.fetchone()
@@ -179,6 +195,7 @@ class RegimenBank:
         return Regimen(
             name=row["name"],
             disease_state=row["disease_state"],
+            on_study=bool(row["on_study"]),
             notes=row["notes"],
             therapies=therapies,
         )
@@ -199,9 +216,9 @@ class RegimenBank:
                 reg_id = row["id"]
                 self.conn.execute(
                     "UPDATE regimens "
-                    "SET disease_state = ?, notes = ?, updated_at = ? "
+                    "SET disease_state = ?, notes = ?, on_study = ?, updated_at = ? "
                     "WHERE id = ?",
-                    (reg.disease_state, reg.notes, now, reg_id),
+                    (reg.disease_state, reg.notes, int(reg.on_study), now, reg_id),
                 )
                 # replace therapies
                 self.conn.execute(
@@ -210,18 +227,17 @@ class RegimenBank:
                 )
             else:
                 self.conn.execute(
-                    "INSERT INTO regimens(name, disease_state, notes, updated_at) "
-                    "VALUES(?, ?, ?, ?)",
-                    (reg.name, reg.disease_state, reg.notes, now),
+                    "INSERT INTO regimens(name, disease_state, notes, on_study, updated_at) "
+                    "VALUES(?, ?, ?, ?, ?)",
+                    (reg.name, reg.disease_state, reg.notes, int(reg.on_study), now),
                 )
                 reg_id = self.conn.execute(
                     "SELECT id FROM regimens WHERE name = ?",
                     (reg.name,),
                 ).fetchone()["id"]
 
-            # insert therapies
+            # insert therapies (unchanged from your version)
             for t in reg.therapies:
-                # auto-calc total_doses if missing
                 total_doses = (
                     t.total_doses
                     if t.total_doses is not None
@@ -241,6 +257,7 @@ class RegimenBank:
                         total_doses,
                     ),
                 )
+
 
     def delete_regimen(self, name: str) -> bool:
         with self.conn:
@@ -917,6 +934,24 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
 
 
 # ---------------- wizard ----------------
+def _ask_on_study(current: bool) -> bool:
+    """
+    Prompt user to classify regimen as off protocol vs on-study.
+    """
+    print("\nIs this regimen on a research protocol (IRB/CIRB)?")
+    print("  1. Off protocol")
+    print("  2. On study (IRB/CIRB)")
+    default = "2" if current else "1"
+    while True:
+        s = input(f"Select [1-2] (Enter for {default}): ").strip()
+        if not s:
+            s = default
+        if s == "1":
+            return False
+        if s == "2":
+            return True
+        print("Choose 1 or 2.")
+
 def wizard(bank: RegimenBank) -> None:
     rname, is_new = _select_regimen_with_notes(
         bank, "Select a regimen or add a new one:", allow_new=True
@@ -937,6 +972,8 @@ def wizard(bank: RegimenBank) -> None:
 
     reg.disease_state = _opt("Disease state", reg.disease_state)
     reg.notes = _opt("Regimen notes (selection aid only)", reg.notes)
+    # NEW: on-study vs off-protocol
+    reg.on_study = _ask_on_study(reg.on_study)
 
     while True:
         print("\nTherapies:")
@@ -948,17 +985,20 @@ def wizard(bank: RegimenBank) -> None:
                     f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}"
                 )
         print(
-            "\nActions: 1) Add new 2) Add from existing library  3) Edit  "
-            "4) Remove agent  5) Persist (Save / Save As)  6) Finish"
+            "\nActions: 1) Add new  2) Add from existing library  3) Edit  "
+            "4) Remove agent  5) Rename regimen  6) Persist (Save / Save As)  7) Finish"
         )
-        ch = input("Select [1-6]: ").strip()
+        ch = input("Select [1-7]: ").strip()
+
         if ch == "1":
             reg.upsert_chemo(Chemotherapy("", "", "", "", ""))
             reg.therapies[-1] = _edit_agent(reg.therapies[-1])
+
         elif ch == "2":
             tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
             if tmpl:
                 reg.upsert_chemo(_edit_agent(tmpl))
+
         elif ch == "3":
             if not reg.therapies:
                 print("No agents.")
@@ -968,6 +1008,7 @@ def wizard(bank: RegimenBank) -> None:
                 reg.therapies[int(k) - 1] = _edit_agent(reg.therapies[int(k) - 1])
             else:
                 print("Invalid.")
+
         elif ch == "4":
             if not reg.therapies:
                 print("No agents.")
@@ -978,28 +1019,41 @@ def wizard(bank: RegimenBank) -> None:
                 print(f"Removed {gone.name}.")
             else:
                 print("Invalid.")
+
         elif ch == "5":
-            _persist_menu(bank, reg)
+            # Rename regimen
+            print(f"Current regimen name: {reg.name}")
+            new_name = input("New regimen name (leave blank to cancel): ").strip()
+            if new_name:
+                reg.name = new_name
+                print(f"Regimen renamed to '{reg.name}'.")
+            else:
+                print("Name unchanged.")
+
         elif ch == "6":
+            _persist_menu(bank, reg)
+
+        elif ch == "7":
             if input("Save before finishing? [y/N]: ").strip().lower() == "y":
                 _persist_menu(bank, reg)
             print("Done.")
             return
+
         else:
-            print("Choose 1–6.")
+            print("Choose 1–7.")
 
 
 # ---------------- prep editor (no notes UI; save/save-as) ----------------
 def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str]]:
     # Work on a copy so we never mutate the base regimen directly
     work = Regimen(
-        base.name,
-        base.disease_state,
-        base.notes,
-        [replace(t) for t in base.therapies],
+        name=base.name,
+        disease_state=base.disease_state,
+        on_study=base.on_study,
+        notes=base.notes,
+        therapies=[replace(t) for t in base.therapies],
     )
     print(f"\n=== Calendar Prep Editor for '{work.name}' ===")
-    # No calendar-specific note prompt anymore
     inst_note: Optional[str] = None
 
     while True:
@@ -1018,7 +1072,6 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
         ).strip().lower()
 
         if choice == "":
-            # Just use the regimen as-is for this calendar; no edits, no save prompts
             return work, inst_note
 
         if choice not in {"e", "1"}:
@@ -1105,7 +1158,6 @@ def _cycle_label() -> str:
         print("Choose 1 or 2.")
 
 
-# ---------------- calendar flow ----------------
 def calendar_flow(bank: RegimenBank) -> None:
     names = bank.list_regimens()
     if not names:
@@ -1116,14 +1168,57 @@ def calendar_flow(bank: RegimenBank) -> None:
             print("Still empty. Exiting.")
             return
 
-    rname, _ = _select_regimen_with_notes(bank, "Select a regimen:", allow_new=False)
-    if not rname:
-        print("No regimen selected.")
+    # ----- Choose OFF-protocol vs ON-study -----
+    print("\nRegimen type:")
+    print("  1. Off protocol (default)")
+    print("  2. On study (IRB/CIRB)")
+
+    want_on_study = False
+    while True:
+        choice = input("Select [1-2] (Enter for 1): ").strip()
+        if choice == "" or choice == "1":
+            want_on_study = False
+            break
+        if choice == "2":
+            want_on_study = True
+            break
+        print("Choose 1 or 2.")
+
+    # Build subset according to classification in DB
+    subset: List[Regimen] = []
+    for n in names:
+        r = bank.get_regimen(n)
+        if not r:
+            continue
+        if bool(r.on_study) == want_on_study:
+            subset.append(r)
+
+    if not subset:
+        label = "ON-study" if want_on_study else "OFF-protocol"
+        print(f"No {label} regimens found.")
         return
-    base = bank.get_regimen(rname)
-    if not base:
-        print("Not found.")
-        return
+
+    subset.sort(key=lambda r: r.name.lower())
+
+    # Show list with notes and let user pick
+    print("")
+    if want_on_study:
+        print("Select an ON-study regimen:")
+    else:
+        print("Select an OFF-protocol regimen:")
+
+    index_map: Dict[str, Regimen] = {}
+    for i, r in enumerate(subset, 1):
+        note = f"  {_italic('— ' + r.notes)}" if r.notes else ""
+        print(f"  {i}. {r.name}{note}")
+        index_map[str(i)] = r
+
+    while True:
+        sel = input("Select: ").strip()
+        if sel in index_map:
+            base = index_map[sel]
+            break
+        print("Invalid. Try again.")
 
     reg, note = prep_editor(base, bank)
     start = _parse_date("Cycle start date", default=dt.date.today())
