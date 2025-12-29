@@ -15,34 +15,116 @@ from regimenbank import (
     DEFAULT_DB,
 )
 
-# ---------------- page config + light styling ----------------
-st.markdown("""
+# ---------------- page config ----------------
+st.set_page_config(
+    page_title="Chemotherapy Regimen Tools",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ---------------- styling ----------------
+st.markdown(
+    """
 <style>
+/* Page padding + typography rhythm */
+[data-testid="block-container"]{
+  padding-left: 2rem;
+  padding-right: 2rem;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+
+/* Stronger header hierarchy */
+h1 {
+  font-size: 2.05rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.35rem !important;
+}
+h2 {
+  font-size: 1.25rem !important;
+  font-weight: 750 !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.25rem !important;
+}
+h3 {
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  margin-top: 0.65rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+/* Sidebar buttons: stacked nav pills */
 section[data-testid="stSidebar"] button {
   width: 100%;
   border-radius: 999px !important;
-  font-weight: 700 !important;
-  padding: 0.7rem 0.9rem !important;
-  border: 1px solid rgba(255,255,255,0.10) !important;
+  font-weight: 750 !important;
+  padding: 0.72rem 0.95rem !important;
+  border: 1px solid rgba(255,255,255,0.14) !important;
 }
 section[data-testid="stSidebar"] button:hover {
   transform: translateY(-1px);
 }
 
-/* Make primary actions (like export) unmistakable */
+/* Make primary actions unmistakable */
 button[kind="primary"] {
-  font-weight: 800 !important;
-  padding: 0.75rem 0.95rem !important;
-  border-radius: 12px !important;
+  font-weight: 850 !important;
+  padding: 0.78rem 0.95rem !important;
+  border-radius: 14px !important;
+}
+
+/* Calendar preview table */
+.chemo-calendar {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 0.86rem;
+}
+.chemo-calendar th, .chemo-calendar td {
+  border: 1px solid rgba(0,0,0,0.12);
+  padding: 6px 6px;
+  vertical-align: top;
+}
+.chemo-calendar th {
+  text-align: center;
+  background-color: #111827;
+  color: #ffffff;
+  font-weight: 750;
+  padding: 8px 6px;
+}
+.chemo-calendar .cell-date {
+  text-align: right;
+  font-weight: 750;
+  margin-bottom: 2px;
+}
+.chemo-calendar .cell-day {
+  font-style: italic;
+  opacity: 0.9;
+  margin-bottom: 4px;
+}
+.chemo-calendar .cell-med {
+  font-weight: 750;
+}
+.chemo-calendar .cell-rest {
+  opacity: 0.6;
+}
+
+/* Reduce visual noise from markdown separators */
+hr {
+  margin-top: 0.9rem;
+  margin-bottom: 0.9rem;
+  opacity: 0.35;
 }
 </style>
-""", 
-
+""",
     unsafe_allow_html=True,
 )
 
 # ---------------- config ----------------
 APP_PASSWORD = "honc25"  # change as needed
+
+# Use a single column ratio everywhere for visual consistency
+COLS_3 = [1.6, 4.8, 2.6]
 
 
 # ---------------- helpers ----------------
@@ -85,16 +167,13 @@ def require_login() -> None:
         return
 
     st.title("Sign in")
-
-    st.write(
-        "Enter the access key"
-    )
+    st.write("Enter the access key.")
 
     pw = st.text_input("Access key", type="password")
 
     col1, _ = st.columns([1, 3])
     with col1:
-        if st.button("Sign in", type="primary"):
+        if st.button("Sign in", type="primary", use_container_width=True):
             if pw and pw == APP_PASSWORD:
                 st.session_state["authenticated"] = True
             else:
@@ -117,32 +196,17 @@ def render_calendar_preview(
     months = pycal.month_name[first_sun.month]
     if first_sun.month != last_sat.month or first_sun.year != last_sat.year:
         months += f" – {pycal.month_name[last_sat.month]}"
-    if first_sun.year == last_sat.year:
-        year_str = str(first_sun.year)
-    else:
-        year_str = f"{first_sun.year}–{last_sat.year}"
+    year_str = str(first_sun.year) if first_sun.year == last_sat.year else f"{first_sun.year}–{last_sat.year}"
 
     st.markdown(f"**{reg.name} — {label}**")
     st.markdown(f"{months} {year_str}")
     if note:
         st.markdown(f"*{note}*")
 
-    header_names = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ]
+    header_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
     html = ['<table class="chemo-calendar">']
-    # Header row
-    html.append("<tr>")
-    for dname in header_names:
-        html.append(f"<th>{dname}</th>")
-    html.append("</tr>")
+    html.append("<tr>" + "".join(f"<th>{d}</th>" for d in header_names) + "</tr>")
 
     import calendar as calmod
     for week in grid:
@@ -153,9 +217,7 @@ def render_calendar_preview(
             labels = cell["labels"] or []
 
             html.append("<td>")
-            html.append(
-                f'<div class="cell-date">{calmod.month_abbr[date.month]} {date.day}</div>'
-            )
+            html.append(f'<div class="cell-date">{calmod.month_abbr[date.month]} {date.day}</div>')
             if cd is not None:
                 html.append(f'<div class="cell-day">Day {cd}</div>')
                 for lab in labels:
@@ -173,27 +235,24 @@ def render_calendar_preview(
 # ---------------- pages ----------------
 def page_overview() -> None:
     st.title("Chemotherapy Regimen Tools")
+    st.write("Maintain a regimen bank and generate patient-facing chemotherapy calendars.")
 
-    st.write(
-        "Use this interface to maintain a regimen bank and generate patient-facing "
-        "chemotherapy calendars."
-    )
-
-    st.subheader("Sections")
+    st.subheader("Regimen Builder")
     st.markdown(
         """
-**Regimen Builder**
-
-- Create or edit chemotherapy regimens  
+- Create or edit regimens  
 - Set disease state, protocol status, and notes  
-- Add or modify therapy components (route, dose, schedule)
+- Manage therapy components (route, dose, schedule)
+"""
+    )
 
-**Calendar Generator**
-
+    st.subheader("Calendar Generator")
+    st.markdown(
+        """
 - Select a regimen from the bank  
 - Choose cycle start date, cycle length, and phase  
 - Review an in-page calendar preview  
-- Optionally download a formatted calendar file for printing or upload
+- Export a formatted calendar file
 """
     )
 
@@ -201,61 +260,53 @@ def page_overview() -> None:
 def page_builder(bank: RegimenBank) -> None:
     st.title("Regimen Builder")
 
-    # Track whether therapy editor is visible
     if "edit_therapies_open" not in st.session_state:
         st.session_state["edit_therapies_open"] = False
 
-    # 3-column layout: selection, editing, summary
-    col_sel, col_edit, col_summary = st.columns((1.5, 4.5, 2.5), gap="medium")
+    col_sel, col_edit, col_summary = st.columns(COLS_3, gap="large")
 
     # -------- left: selection + delete --------
     with col_sel:
-        st.subheader("Select regimen")
+        st.subheader("Selection")
 
         names = bank.list_regimens()
         selected_name: Optional[str] = None
         if not names:
-            st.info("No regimens found. Use the middle column to create a new regimen.")
+            st.info("No regimens found. Create one in the center panel.")
         else:
             names_sorted = sorted(names, key=str.lower)
             selected_name = st.selectbox(
-                "Existing regimens",
-                options=["(none)"] + names_sorted,
+                "Regimen",
+                options=["(new)"] + names_sorted,
                 index=0,
             )
-            if selected_name == "(none)":
+            if selected_name == "(new)":
                 selected_name = None
 
         st.markdown("---")
 
-        # Delete regimen
         if selected_name:
-            st.subheader("Delete regimen")
-            st.write(
-                "Type the regimen name to confirm deletion."
-            )
+            st.subheader("Delete")
+            st.write("Type the regimen name to confirm deletion.")
             confirm_text = st.text_input(
                 "Confirmation",
                 placeholder=selected_name,
                 key="delete_confirm",
             )
-            if st.button("Delete regimen"):
+            if st.button("Delete regimen", use_container_width=True):
                 if confirm_text.strip() == selected_name:
                     ok = bank.delete_regimen(selected_name)
                     if ok:
-                        st.success(f"Deleted regimen '{selected_name}'.")
+                        st.success(f"Deleted '{selected_name}'.")
                         st.session_state.pop("delete_confirm", None)
                         st.rerun()
                     else:
                         st.error("Regimen not found.")
                 else:
-                    st.error("Confirmation text does not match regimen name.")
+                    st.error("Confirmation text does not match.")
 
     # Load current regimen or create empty
-    if selected_name:
-        base = bank.get_regimen(selected_name)
-    else:
-        base = None
+    base = bank.get_regimen(selected_name) if selected_name else None
 
     if base is None:
         reg_name = ""
@@ -272,7 +323,7 @@ def page_builder(bank: RegimenBank) -> None:
 
     # -------- middle: details + save + therapy editor toggle --------
     with col_edit:
-        st.subheader("Regimen details")
+        st.subheader("Details")
 
         reg_name = st.text_input("Regimen name", value=reg_name)
         disease_state_val = st.text_input("Disease state", value=disease_state_val)
@@ -282,16 +333,13 @@ def page_builder(bank: RegimenBank) -> None:
             index=1 if on_study_val else 0,
             horizontal=True,
         ) == "On study"
-        notes_val = st.text_area(
-            "Notes (shown only on selection lists)",
-            value=notes_val,
-            height=80,
-        )
+        notes_val = st.text_area("Notes", value=notes_val, height=90)
 
         st.markdown("---")
-        col_save1, col_save2 = st.columns(2)
 
-        with col_save1:
+        # Primary actions grouped cleanly
+        a1, a2 = st.columns([1, 1], gap="medium")
+        with a1:
             if st.button("Save regimen", type="primary", use_container_width=True):
                 if not reg_name.strip():
                     st.error("Regimen name is required.")
@@ -304,18 +352,18 @@ def page_builder(bank: RegimenBank) -> None:
                         therapies=therapies,
                     )
                     bank.upsert_regimen(reg)
-                    st.success(f"Saved '{reg.name}' to the regimen bank.")
+                    st.success(f"Saved '{reg.name}'.")
 
-        with col_save2:
+        with a2:
             new_name = st.text_input(
-                "Save as new regimen name",
+                "Save as",
                 value="",
-                placeholder="Leave blank to skip",
+                placeholder="New regimen name",
                 key="save_as_name",
             )
-            if st.button("Save as new regimen", use_container_width=True):
+            if st.button("Save as new", use_container_width=True):
                 if not new_name.strip():
-                    st.error("New regimen name is required for Save as new.")
+                    st.error("New regimen name is required.")
                 else:
                     reg = Regimen(
                         name=new_name.strip(),
@@ -325,26 +373,22 @@ def page_builder(bank: RegimenBank) -> None:
                         therapies=therapies,
                     )
                     bank.upsert_regimen(reg)
-                    st.success(f"Saved new regimen '{reg.name}'.")
+                    st.success(f"Saved '{reg.name}'.")
                     st.rerun()
 
         st.markdown("---")
 
-        # Toggle therapy editor visibility
-        if st.button(
-            "Edit therapies",
-            use_container_width=True,
-        ):
-            st.session_state["edit_therapies_open"] = not st.session_state[
-                "edit_therapies_open"
-            ]
+        # Therapy editor toggle
+        label = "Edit therapies" if not st.session_state["edit_therapies_open"] else "Close therapy editor"
+        if st.button(label, use_container_width=True):
+            st.session_state["edit_therapies_open"] = not st.session_state["edit_therapies_open"]
 
-        # Therapy editor (only if toggled on)
         if st.session_state["edit_therapies_open"]:
-            st.markdown("#### Therapy editor")
+            st.subheader("Therapy editor")
 
             with st.form("therapy_form", clear_on_submit=False):
                 edit_mode = st.checkbox("Edit existing therapy", value=False)
+
                 if edit_mode and therapies:
                     idx = st.selectbox(
                         "Therapy to edit",
@@ -356,36 +400,17 @@ def page_builder(bank: RegimenBank) -> None:
                     idx = None
                     current = None
 
-                name_val = st.text_input(
-                    "Agent name",
-                    value=current.name if current else "",
-                )
-                route_val = st.text_input(
-                    "Route (e.g. IV, PO, SQ, IM, IT)",
-                    value=current.route if current else "",
-                )
-                dose_val = st.text_input(
-                    "Dose",
-                    value=current.dose if current else "",
-                )
-                freq_val = st.text_input(
-                    "Frequency (free text: once, daily, BID, weekly …)",
-                    value=current.frequency if current else "",
-                )
-                dur_val = st.text_input(
-                    "Day map for calendar (e.g. 'Days 1–7', 'Days 1,8,15')",
-                    value=current.duration if current else "",
-                )
+                name_val = st.text_input("Agent name", value=current.name if current else "")
+                route_val = st.text_input("Route", value=current.route if current else "")
+                dose_val = st.text_input("Dose", value=current.dose if current else "")
+                freq_val = st.text_input("Frequency", value=current.frequency if current else "")
+                dur_val = st.text_input("Day map", value=current.duration if current else "")
                 total_doses_val = st.text_input(
-                    "Total doses (optional; leave blank to auto-calculate)",
-                    value=(
-                        str(current.total_doses)
-                        if current and current.total_doses is not None
-                        else ""
-                    ),
+                    "Total doses (optional)",
+                    value=str(current.total_doses) if current and current.total_doses is not None else "",
                 )
 
-                submitted = st.form_submit_button("Apply therapy")
+                submitted = st.form_submit_button("Apply")
 
                 if submitted:
                     if not name_val.strip():
@@ -402,10 +427,8 @@ def page_builder(bank: RegimenBank) -> None:
                             try:
                                 td = int(total_doses_val.strip())
                             except ValueError:
-                                st.warning(
-                                    "Could not parse total doses as an integer; "
-                                    "leaving it auto-calculated."
-                                )
+                                st.warning("Total doses must be an integer (or blank).")
+
                         new_t = Chemotherapy(
                             name=name_val.strip(),
                             route=route_val.strip(),
@@ -418,73 +441,59 @@ def page_builder(bank: RegimenBank) -> None:
                             therapies[idx] = new_t
                         else:
                             therapies.append(new_t)
-                        st.success("Therapy updated in this session.")
+                        st.success("Updated therapy (in this session).")
 
-            # remove therapy
             if therapies:
                 with st.expander("Remove a therapy"):
                     idx_to_remove = st.selectbox(
-                        "Select therapy to remove",
+                        "Therapy",
                         options=["(none)"] + list(range(len(therapies))),
                         format_func=lambda x: "(none)" if x == "(none)" else therapies[x].name,
                     )
                     if idx_to_remove != "(none)":
-                        if st.button("Remove selected therapy"):
+                        if st.button("Remove", use_container_width=True):
                             removed = therapies.pop(idx_to_remove)
-                            st.success(f"Removed {removed.name} from this regimen.")
+                            st.success(f"Removed {removed.name}.")
 
     # -------- right: summary (including therapies) --------
     with col_summary:
         st.subheader("Summary")
 
-        if reg_name.strip():
-            st.markdown(f"**Name:** {reg_name.strip()}")
-        else:
-            st.markdown("**Name:** (new regimen)")
-
+        st.markdown(f"**Name:** {reg_name.strip() or '(new regimen)'}")
         if disease_state_val.strip():
             st.markdown(f"**Disease state:** {disease_state_val.strip()}")
-        if on_study_val:
-            st.markdown("**Protocol status:** On study")
-        else:
-            st.markdown("**Protocol status:** Off protocol")
+        st.markdown(f"**Protocol status:** {'On study' if on_study_val else 'Off protocol'}")
 
         if notes_val.strip():
+            st.markdown("---")
             st.markdown("**Notes**")
-            st.markdown(notes_val.strip())
+            st.write(notes_val.strip())
 
         st.markdown("---")
         st.markdown("**Therapies**")
-
         if therapies:
             for t in therapies:
-                line = (
-                    f"- **{t.name}** ({t.route}) — {t.dose}; "
-                    f"{t.frequency}; {t.duration}"
-                )
-                st.markdown(line)
+                st.markdown(f"- **{t.name}** ({t.route}) — {t.dose}; {t.frequency}; {t.duration}")
         else:
-            st.write("No therapies defined for this regimen yet.")
+            st.write("No therapies defined yet.")
 
 
 def page_calendar(bank: RegimenBank) -> None:
     st.title("Calendar Generator")
 
     off, on = list_regimens_grouped(bank)
-
     if not off and not on:
-        st.info("No regimens available. Use the Regimen Builder to create regimens first.")
+        st.info("No regimens available. Create regimens in Regimen Builder first.")
         return
 
-    # 3-column layout: regimen selection, cycle settings + preview, export
-    col_reg, col_cycle, col_export = st.columns((1.5, 4.5, 2.5), gap="medium")
+    col_reg, col_cycle, col_export = st.columns(COLS_3, gap="large")
 
     # -------- left: regimen selection --------
     with col_reg:
         st.subheader("Regimen")
 
         regimen_type = st.radio(
-            "Regimen group",
+            "Group",
             options=["Off protocol", "On study"],
             index=0,
             horizontal=False,
@@ -496,55 +505,34 @@ def page_calendar(bank: RegimenBank) -> None:
             return
 
         reg_map = {r.name: r for r in candidates}
-        selected_name = st.selectbox(
-            "Select regimen",
-            options=sorted(reg_map.keys(), key=str.lower),
-        )
+        selected_name = st.selectbox("Select regimen", options=sorted(reg_map.keys(), key=str.lower))
         reg = reg_map[selected_name]
 
         st.markdown("---")
-        st.write("Protocol status:")
-        st.write("On study" if reg.on_study else "Off protocol")
+        st.write(f"**Status:** {'On study' if reg.on_study else 'Off protocol'}")
 
     # -------- middle: cycle settings + preview --------
     with col_cycle:
-        st.subheader("Cycle settings")
+        st.subheader("Cycle")
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3 = st.columns([1, 1, 1], gap="medium")
         with c1:
             start_date = st.date_input("Cycle start date", value=dt.date.today())
         with c2:
             cycle_len = st.number_input("Cycle length (days)", min_value=1, value=28)
         with c3:
-            phase = st.selectbox(
-                "Phase",
-                options=["Cycle", "Induction"],
-                index=0,
-            )
+            phase = st.selectbox("Phase", options=["Cycle", "Induction"], index=0)
             cycle_num: Optional[int] = None
             if phase == "Cycle":
-                cycle_num = st.number_input(
-                    "Cycle number",
-                    min_value=1,
-                    value=1,
-                    step=1,
-                )
+                cycle_num = st.number_input("Cycle number", min_value=1, value=1, step=1)
 
-        label = _cycle_label_from_inputs(
-            "Induction" if phase == "Induction" else "Cycle",
-            cycle_num,
-        )
-
+        label = _cycle_label_from_inputs("Induction" if phase == "Induction" else "Cycle", cycle_num)
         st.text_input("Calendar label", value=label, disabled=True)
 
         st.markdown("---")
-        st.subheader("Calendar preview")
+        st.subheader("Preview")
 
-        note = st.text_input(
-            "Optional note (e.g. clinic contact or key instructions)",
-            value="",
-        )
-
+        note = st.text_input("Optional note", value="")
         render_calendar_preview(
             reg=reg,
             start=start_date,
@@ -555,14 +543,11 @@ def page_calendar(bank: RegimenBank) -> None:
 
     # -------- right: export --------
     with col_export:
-        st.subheader("Calendar file")
+        st.subheader("Export")
 
-        st.write(
-            "Generate a formatted calendar document matching the preview. "
-            "This file can be printed or uploaded to the chart."
-        )
+        st.write("Generate a formatted calendar file matching the preview.")
 
-        if st.button("Generate calendar file", type="primary", use_container_width=True):
+        if st.button("Generate calendar", type="primary", use_container_width=True):
             tmp_path = Path("calendar_preview.docx")
             ok = export_calendar_docx(
                 reg=reg,
@@ -573,21 +558,17 @@ def page_calendar(bank: RegimenBank) -> None:
                 note=note or None,
             )
             if not ok:
-                st.error(
-                    "Calendar export failed. Ensure python-docx is installed."
-                )
+                st.error("Export failed. Ensure python-docx is installed.")
             else:
                 data = tmp_path.read_bytes()
                 tmp_path.unlink(missing_ok=True)
-                st.success("Calendar file generated.")
+                st.success("Calendar generated.")
                 st.download_button(
-                    label="Download calendar file",
+                    label="Download",
                     data=data,
                     file_name=f"{reg.name.replace(' ', '_')}_{label.replace(' ', '')}_{start_date.isoformat()}.docx",
-                    mime=(
-                        "application/vnd.openxmlformats-officedocument."
-                        "wordprocessingml.document"
-                    ),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
                 )
 
 
@@ -598,19 +579,25 @@ def main() -> None:
     if "section" not in st.session_state:
         st.session_state["section"] = "Main"
 
+    section = st.session_state["section"]
+
     with st.sidebar:
         st.title("Navigation")
 
-        if st.button("Main", use_container_width=True):
+        # Active state: current page uses primary button
+        if st.button("Main", type="primary" if section == "Main" else "secondary", use_container_width=True):
             st.session_state["section"] = "Main"
-        if st.button("Regimen Builder", use_container_width=True):
+            st.rerun()
+        if st.button("Regimen Builder", type="primary" if section == "Regimen Builder" else "secondary", use_container_width=True):
             st.session_state["section"] = "Regimen Builder"
-        if st.button("Calendar Generator", use_container_width=True):
+            st.rerun()
+        if st.button("Calendar Generator", type="primary" if section == "Calendar Generator" else "secondary", use_container_width=True):
             st.session_state["section"] = "Calendar Generator"
+            st.rerun()
 
     bank = get_bank()
-    section = st.session_state["section"]
 
+    section = st.session_state["section"]
     if section == "Main":
         page_overview()
     elif section == "Regimen Builder":
