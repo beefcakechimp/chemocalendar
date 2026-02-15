@@ -25,47 +25,123 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+/* --- App background + canvas --- */
+html, body, [data-testid="stAppViewContainer"] {
+  background: #f5f7fb !important;
+}
 [data-testid="block-container"]{
-  padding-left: 2rem;
-  padding-right: 2rem;
-  padding-top: 1.25rem;
-  padding-bottom: 1.25rem;
+  max-width: 1200px;
+  padding-left: 1.6rem;
+  padding-right: 1.6rem;
+  padding-top: 1.1rem;
+  padding-bottom: 2rem;
 }
 
+/* Headings */
 h1 {
   font-size: 2.05rem !important;
-  font-weight: 800 !important;
+  font-weight: 850 !important;
   letter-spacing: -0.02em;
   margin-bottom: 0.35rem !important;
 }
 h2 {
   font-size: 1.25rem !important;
-  font-weight: 750 !important;
+  font-weight: 780 !important;
   margin-top: 0.75rem !important;
   margin-bottom: 0.25rem !important;
 }
 h3 {
   font-size: 1.05rem !important;
-  font-weight: 700 !important;
+  font-weight: 740 !important;
   margin-top: 0.65rem !important;
   margin-bottom: 0.25rem !important;
 }
 
+/* --- Sidebar buttons --- */
 section[data-testid="stSidebar"] button {
   width: 100%;
   border-radius: 999px !important;
-  font-weight: 750 !important;
-  padding: 0.72rem 0.95rem !important;
+  font-weight: 760 !important;
+  padding: 0.68rem 0.95rem !important;
   border: 1px solid rgba(255,255,255,0.14) !important;
 }
 section[data-testid="stSidebar"] button:hover { transform: translateY(-1px); }
 
+/* --- Buttons --- */
 button[kind="primary"] {
-  font-weight: 850 !important;
+  font-weight: 860 !important;
   padding: 0.78rem 0.95rem !important;
-  border-radius: 14px !important;
+  border-radius: 12px !important;
 }
 
+/* --- Top "app bar" --- */
+.appbar {
+  background: #4f81c7;
+  color: white;
+  padding: 16px 18px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.10);
+  margin-bottom: 14px;
+}
+.appbar .brand {
+  font-weight: 880;
+  font-size: 1.15rem;
+  letter-spacing: 0.2px;
+}
+.appbar .sub {
+  opacity: 0.92;
+  font-size: 0.95rem;
+}
+
+/* --- Cards --- */
+.card {
+  background: white;
+  border-radius: 14px;
+  padding: 14px 14px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+/* --- Stepper --- */
+.stepper {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 4px 0 10px 0;
+}
+.step {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(79,129,199,0.10);
+  color: #1f2a44;
+  font-weight: 760;
+  font-size: 0.90rem;
+  border: 1px solid rgba(79,129,199,0.18);
+}
+.step.active {
+  background: #4f81c7;
+  color: white;
+  border-color: rgba(255,255,255,0.25);
+}
+
+/* --- Make Streamlit widgets feel less "boxy" --- */
+div[data-baseweb="input"], div[data-baseweb="select"] > div {
+  border-radius: 12px !important;
+}
+
+/* Compact radio spacing */
+div[role="radiogroup"] > label {
+  padding-top: 0.15rem !important;
+  padding-bottom: 0.15rem !important;
+}
+
+/* Subtle divider */
+hr { margin-top: 0.9rem; margin-bottom: 0.9rem; opacity: 0.22; }
+
+/* --- Calendar preview table --- */
 .chemo-calendar {
   border-collapse: collapse;
   width: 100%;
@@ -73,7 +149,7 @@ button[kind="primary"] {
   font-size: 0.86rem;
 }
 .chemo-calendar th, .chemo-calendar td {
-  border: 1px solid rgba(0,0,0,0.12);
+  border: 1px solid rgba(0,0,0,0.10);
   padding: 6px 6px;
   vertical-align: top;
 }
@@ -81,15 +157,13 @@ button[kind="primary"] {
   text-align: center;
   background-color: #111827;
   color: #ffffff;
-  font-weight: 750;
+  font-weight: 760;
   padding: 8px 6px;
 }
-.chemo-calendar .cell-date { text-align: right; font-weight: 750; margin-bottom: 2px; }
+.chemo-calendar .cell-date { text-align: right; font-weight: 760; margin-bottom: 2px; }
 .chemo-calendar .cell-day  { font-style: italic; opacity: 0.9; margin-bottom: 4px; }
-.chemo-calendar .cell-med  { font-weight: 750; }
+.chemo-calendar .cell-med  { font-weight: 760; }
 .chemo-calendar .cell-rest { opacity: 0.6; }
-
-hr { margin-top: 0.9rem; margin-bottom: 0.9rem; opacity: 0.35; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -263,42 +337,59 @@ def _draft_to_regimen(name_override: Optional[str] = None) -> Regimen:
 
 # ---------------- pages ----------------
 def page_overview() -> None:
-    st.title("Chemotherapy Regimen Tools")
-    st.write("Maintain a regimen bank and generate patient-facing chemotherapy calendars.")
+    st.markdown(
+        """
+<div class="appbar">
+  <div class="brand">Chemotherapy Regimen Tools</div>
+  <div class="sub">Regimen bank • Calendar generator • DOCX export</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     c1, c2 = st.columns([1, 1], gap="large")
     with c1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Regimen Builder")
         st.markdown(
             """
 - Create and standardize regimens  
-- Use existing regimens as templates when helpful  
+- Use existing regimens as templates  
 - Store selection notes to distinguish similar regimens
 """
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with c2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Calendar Generator")
         st.markdown(
             """
-- Generate an in-page preview  
-- Export a formatted calendar file  
-- Defaults to the regimen you just saved
+- Guided workflow (Regimen → Schedule → Preview/Export)  
+- In-page preview  
+- Export formatted DOCX
 """
         )
-
-# NOTE: page_builder is unchanged from what you pasted (kept as-is)
-# (You can paste your existing page_builder here — leaving out for brevity would be bad,
-# so I’m including it exactly as you provided.)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 def page_builder(bank: RegimenBank) -> None:
     _init_workflow_state()
-    st.title("Regimen Builder")
+
+    st.markdown(
+        """
+<div class="appbar">
+  <div class="brand">Regimen Builder</div>
+  <div class="sub">Create • Template • Save</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     mode = st.session_state["builder_mode"]
 
     if mode == "start":
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Start")
-
         c1, c2 = st.columns([1, 1], gap="large")
         with c1:
             st.markdown("### Create new")
@@ -314,10 +405,11 @@ def page_builder(bank: RegimenBank) -> None:
             if st.button("Use existing as template", use_container_width=True, key="rb_template"):
                 st.session_state["builder_mode"] = "template"
                 st.rerun()
-
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     if mode == "template":
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Choose a template")
 
         top = st.columns([1, 1, 1], gap="medium")
@@ -332,7 +424,12 @@ def page_builder(bank: RegimenBank) -> None:
                 st.rerun()
 
         off, on = list_regimens_grouped(bank)
-        q = st.text_input("Search", value="", placeholder="Search regimens (name or notes)…", key="rb_tpl_q").strip().lower()
+        q = st.text_input(
+            "Search",
+            value="",
+            placeholder="Search regimens (name or notes)…",
+            key="rb_tpl_q",
+        ).strip().lower()
 
         tab_off, tab_on = st.tabs([f"Off protocol ({len(off)})", f"On study ({len(on)})"])
 
@@ -361,11 +458,14 @@ def page_builder(bank: RegimenBank) -> None:
         with tab_on:
             _render_template_list(on, "No matching on-study regimens.")
 
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     left, right = st.columns([2.8, 2.2], gap="large")
 
     with left:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+
         header = st.columns([1, 3], gap="small")
         with header[0]:
             if st.button("← Start", use_container_width=True, key="rb_back_start"):
@@ -426,6 +526,8 @@ def page_builder(bank: RegimenBank) -> None:
 
             if go_to_calendar:
                 st.session_state["section"] = "Calendar Generator"
+                # jump user straight into Step 2 (schedule) now that regimen is set
+                st.session_state["cal_step"] = 2
                 st.rerun()
             else:
                 st.success("Saved.")
@@ -453,7 +555,10 @@ def page_builder(bank: RegimenBank) -> None:
                     else:
                         st.error("Confirmation text does not match.")
 
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("### Therapies")
         therapies: List[Chemotherapy] = st.session_state["draft_therapies"]
 
@@ -543,23 +648,37 @@ def page_builder(bank: RegimenBank) -> None:
                 st.session_state["draft_therapies"] = therapies
                 st.rerun()
 
+        st.markdown("</div>", unsafe_allow_html=True)
+
 def page_calendar(bank: RegimenBank) -> None:
-    st.title("Calendar Generator")
+    st.markdown(
+        """
+<div class="appbar">
+  <div class="brand">Chemotherapy Calendar</div>
+  <div class="sub">Guided workflow • Professional preview • DOCX export</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     off, on = list_regimens_grouped(bank)
     if not off and not on:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.info("No regimens available. Create regimens in Regimen Builder first.")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    # ---------- stable state for calendar inputs ----------
+    # ---------- stable state ----------
+    st.session_state.setdefault("cal_step", 1)
+
     st.session_state.setdefault("cal_group", "Off protocol")
     st.session_state.setdefault("cal_search", "")
     st.session_state.setdefault("cal_regimen_name", None)
 
     # Title state (user-facing doc title; does NOT rename regimen in bank)
-    st.session_state.setdefault("cal_title_seeded_for", None)  # regimen name last used to seed
-    # NOTE: we intentionally do NOT setdefault("cal_title", "") here,
-    # because we want the widget to be able to re-seed cleanly by popping the key.
+    st.session_state.setdefault("cal_title", "")
+    st.session_state.setdefault("cal_title_seeded_for", None)
+    st.session_state.setdefault("cal_title_dirty", False)
 
     st.session_state.setdefault("cal_start", dt.date.today())
     st.session_state.setdefault("cal_cycle_len", 28)
@@ -567,146 +686,228 @@ def page_calendar(bank: RegimenBank) -> None:
     st.session_state.setdefault("cal_cycle_num", 1)
     st.session_state.setdefault("cal_note", "")
 
-    # ---------- 1) Regimen (FULL WIDTH) ----------
-    st.subheader("1) Regimen")
-
-    st.radio(
-        "Group",
-        options=["Off protocol", "On study"],
-        key="cal_group",
-        horizontal=True,
+    # ---------- stepper ----------
+    steps = {1: "1) Regimen", 2: "2) Schedule", 3: "3) Preview / Export"}
+    st.markdown(
+        '<div class="stepper">'
+        + "".join(
+            f'<div class="step {"active" if st.session_state["cal_step"]==k else ""}">{v}</div>'
+            for k, v in steps.items()
+        )
+        + "</div>",
+        unsafe_allow_html=True,
     )
 
+    nav = st.columns([1, 1, 6], gap="small")
+    with nav[0]:
+        if st.button("← Back", use_container_width=True, disabled=st.session_state["cal_step"] == 1):
+            st.session_state["cal_step"] -= 1
+            st.rerun()
+    with nav[1]:
+        if st.button("Next →", type="primary", use_container_width=True, disabled=st.session_state["cal_step"] == 3):
+            st.session_state["cal_step"] += 1
+            st.rerun()
+
+    # ---------- helper: regimen selection ----------
+    def _select_regimen(name: str) -> None:
+        st.session_state["cal_regimen_name"] = name
+        # Auto-populate title from regimen name whenever regimen changes
+        st.session_state["cal_title"] = name
+        st.session_state["cal_title_seeded_for"] = name
+        st.session_state["cal_title_dirty"] = False
+
+    def _mark_title_dirty() -> None:
+        st.session_state["cal_title_dirty"] = True
+
+    # ---------- Step 1: Regimen ----------
+    if st.session_state["cal_step"] == 1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        row = st.columns([1.15, 2.4], gap="medium")
+        with row[0]:
+            st.radio(
+                "Group",
+                options=["Off protocol", "On study"],
+                key="cal_group",
+                horizontal=True,
+            )
+        with row[1]:
+            st.text_input(
+                "Search",
+                key="cal_search",
+                placeholder="Filter by regimen name or selection notes…",
+            )
+
+        candidates = off if st.session_state["cal_group"] == "Off protocol" else on
+        if not candidates:
+            st.warning(f"No {st.session_state['cal_group'].lower()} regimens found.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        q = (st.session_state.get("cal_search") or "").strip().lower()
+        regs = candidates
+        if q:
+            regs = [r for r in regs if q in r.name.lower() or q in (r.notes or "").lower()]
+        if not regs:
+            st.warning("No matching regimens.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        reg_map_all = {r.name: r for r in candidates}
+        filtered_names = [r.name for r in regs]
+
+        active = st.session_state.get("active_regimen_name")
+        if st.session_state.get("cal_regimen_name") not in filtered_names:
+            st.session_state["cal_regimen_name"] = active if active in filtered_names else filtered_names[0]
+
+        options = [r.name for r in regs]
+        label_lookup = {r.name: r.name for r in regs}  # name-only; notes shown only in Details
+
+        pick_col, details_col = st.columns([2.2, 1.8], gap="large")
+        with pick_col:
+            st.markdown("**Pick a regimen**")
+            with st.container(height=520, border=True):
+                chosen = st.radio(
+                    "Regimens",
+                    options=options,
+                    index=options.index(st.session_state["cal_regimen_name"]),
+                    format_func=lambda name: label_lookup.get(name, name),
+                    key="cal_regimen_radio",
+                    label_visibility="collapsed",
+                )
+            if chosen != st.session_state["cal_regimen_name"]:
+                _select_regimen(chosen)
+                st.rerun()
+
+        selected_name = st.session_state["cal_regimen_name"]
+        reg = reg_map_all[selected_name]
+
+        with details_col:
+            st.markdown("**Details**")
+            meta = []
+            meta.append("On study" if reg.on_study else "Off protocol")
+            if reg.disease_state:
+                meta.append(reg.disease_state)
+            st.caption(" • ".join(meta) if meta else " ")
+
+            with st.container(height=520, border=True):
+                if reg.notes and reg.notes.strip():
+                    st.write(reg.notes)
+                else:
+                    st.info("No selection notes for this regimen.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Ensure title seeded at least once (if user lands here via sidebar)
+        if st.session_state.get("cal_title_seeded_for") != reg.name:
+            st.session_state["cal_title"] = reg.name
+            st.session_state["cal_title_seeded_for"] = reg.name
+            st.session_state["cal_title_dirty"] = False
+
+        return  # step 1 ends here
+
+    # For steps 2/3 we need a resolved regimen
     candidates = off if st.session_state["cal_group"] == "Off protocol" else on
     if not candidates:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.warning(f"No {st.session_state['cal_group'].lower()} regimens found.")
-        return
-
-    # Filter tucked away so the page doesn’t look like a control panel
-    with st.expander("Filter regimens", expanded=False):
-        st.text_input(
-            "Search",
-            key="cal_search",
-            placeholder="Type to filter by regimen name or selection notes…",
-        )
-    q = (st.session_state.get("cal_search") or "").strip().lower()
-
-    regs = candidates
-    if q:
-        regs = [
-            r for r in regs
-            if q in r.name.lower() or q in (r.notes or "").lower()
-        ]
-
-    if not regs:
-        st.warning("No matching regimens.")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     reg_map_all = {r.name: r for r in candidates}
-    filtered_names = [r.name for r in regs]
+    if st.session_state.get("cal_regimen_name") not in reg_map_all:
+        # fall back safely
+        st.session_state["cal_regimen_name"] = candidates[0].name
 
-    # Keep a stable selection even when switching groups/filters
-    active = st.session_state.get("active_regimen_name")
-    if st.session_state["cal_regimen_name"] not in filtered_names:
-        st.session_state["cal_regimen_name"] = active if active in filtered_names else filtered_names[0]
+    reg = reg_map_all[st.session_state["cal_regimen_name"]]
 
-    def _select_regimen(name: str) -> None:
-        st.session_state["cal_regimen_name"] = name
-
-        # IMPORTANT: force title to re-seed next run (auto-populate behavior)
-        st.session_state.pop("cal_title", None)
-        st.session_state["cal_title_seeded_for"] = None
-
-    selected_name = st.session_state["cal_regimen_name"]
-    reg = reg_map_all[selected_name]
-
-    # Two-panel selector: left list (with note snippets), right full notes/details
-    pick_col, notes_col = st.columns([1.6, 2.4], gap="large")
-
-    with pick_col:
-        # Scrollable pick list with visible note snippets (no dropdown)
-        with st.container(height=420, border=True):
-            for r in regs:
-                is_sel = (r.name == st.session_state["cal_regimen_name"])
-                btn_label = f"✅ {r.name}" if is_sel else r.name
-
-                if st.button(btn_label, use_container_width=True, key=f"cal_pick_{r.name}"):
-                    _select_regimen(r.name)
-                    st.rerun()
-
-                sn = _note_snip(r.notes, n=140)
-                if sn:
-                    st.caption(sn)
-                else:
-                    st.caption(" ")
-                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-    # Resolve selection after possible rerun-triggering click
-    selected_name = st.session_state["cal_regimen_name"]
-    reg = reg_map_all[selected_name]
-
-    with notes_col:
-        st.markdown("**Selection notes (full)**")
-        if reg.notes and reg.notes.strip():
-            st.write(reg.notes)
-        else:
-            st.caption("No selection notes for this regimen.")
-
-        st.markdown("---")
-        st.write(f"**Status:** {'On study' if reg.on_study else 'Off protocol'}")
-        if reg.disease_state:
-            st.write(f"**Disease state:** {reg.disease_state}")
-
-    # --- Calendar title: auto-populate from regimen, but still editable ---
-    # If regimen changed since last seed, reset the widget by popping the key BEFORE rendering it.
+    # If regimen changed implicitly (e.g., group), re-seed title
     if st.session_state.get("cal_title_seeded_for") != reg.name:
-        st.session_state.pop("cal_title", None)  # <- key move that restores “auto-populate”
+        st.session_state["cal_title"] = reg.name
         st.session_state["cal_title_seeded_for"] = reg.name
+        st.session_state["cal_title_dirty"] = False
 
-    st.text_input(
-        "Calendar title (for the document)",
-        key="cal_title",
-        value=reg.name,  # used only when key is newly created (after pop)
-        help="This does not rename the regimen in the bank. It only changes the calendar document title.",
+    # ---------- Step 2: Schedule ----------
+    if st.session_state["cal_step"] == 2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+
+        top = st.columns([2.2, 1.8], gap="large")
+        with top[0]:
+            st.subheader("Schedule")
+            st.caption("Define the cycle parameters. Preview/export comes next.")
+
+            st.text_input(
+                "Calendar title (for the document)",
+                key="cal_title",
+                on_change=_mark_title_dirty,
+                help="This does not rename the regimen in the bank. It only changes the calendar document title.",
+            )
+
+            c1, c2, c3 = st.columns([1, 1, 1], gap="medium")
+            with c1:
+                st.date_input("Cycle start date", key="cal_start")
+            with c2:
+                st.number_input("Cycle length (days)", min_value=1, key="cal_cycle_len")
+            with c3:
+                st.selectbox("Phase", options=["Cycle", "Induction"], key="cal_phase")
+                if st.session_state["cal_phase"] == "Cycle":
+                    st.number_input("Cycle number", min_value=1, step=1, key="cal_cycle_num")
+
+            cycle_num = st.session_state["cal_cycle_num"] if st.session_state["cal_phase"] == "Cycle" else None
+            label = _cycle_label_from_inputs(st.session_state["cal_phase"], cycle_num)
+            st.text_input("Calendar label", value=label, disabled=True)
+
+            st.text_input(
+                "Optional note",
+                key="cal_note",
+                placeholder="e.g., ‘Hold venetoclax if ANC < …’",
+            )
+
+        with top[1]:
+            st.subheader("Selected regimen")
+            meta = []
+            meta.append("On study" if reg.on_study else "Off protocol")
+            if reg.disease_state:
+                meta.append(reg.disease_state)
+            st.caption(" • ".join(meta) if meta else " ")
+
+            with st.container(height=360, border=True):
+                st.markdown(f"**{reg.name}**")
+                st.markdown("---")
+                if reg.notes and reg.notes.strip():
+                    st.write(reg.notes)
+                else:
+                    st.caption("No selection notes.")
+
+            # Quick jump back to regimen selection
+            if st.button("Change regimen", use_container_width=True):
+                st.session_state["cal_step"] = 1
+                st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    # ---------- Step 3: Preview / Export ----------
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+
+    # Derive label
+    cycle_num = st.session_state["cal_cycle_num"] if st.session_state["cal_phase"] == "Cycle" else None
+    label = _cycle_label_from_inputs(st.session_state["cal_phase"], cycle_num)
+
+    # Title override (not mutating bank regimen)
+    cal_title = (st.session_state.get("cal_title") or reg.name).strip()
+
+    reg_for_preview = Regimen(
+        name=cal_title,
+        disease_state=reg.disease_state,
+        on_study=reg.on_study,
+        notes=reg.notes,
+        therapies=reg.therapies,
     )
 
-    st.markdown("---")
+    left, right = st.columns([3.2, 1.4], gap="large")
 
-    # ---------- 2) Cycle + preview and 3) Export ----------
-    col_cycle, col_export = st.columns([4.8, 2.6], gap="large")
-
-    with col_cycle:
-        st.subheader("2) Cycle + preview")
-
-        c1, c2, c3 = st.columns([1, 1, 1], gap="medium")
-        with c1:
-            st.date_input("Cycle start date", key="cal_start")
-        with c2:
-            st.number_input("Cycle length (days)", min_value=1, key="cal_cycle_len")
-        with c3:
-            st.selectbox("Phase", options=["Cycle", "Induction"], key="cal_phase")
-            if st.session_state["cal_phase"] == "Cycle":
-                st.number_input("Cycle number", min_value=1, step=1, key="cal_cycle_num")
-
-        cycle_num = st.session_state["cal_cycle_num"] if st.session_state["cal_phase"] == "Cycle" else None
-        label = _cycle_label_from_inputs(st.session_state["cal_phase"], cycle_num)
-
-        st.text_input("Calendar label", value=label, disabled=True)
-
-        st.markdown("---")
-        st.text_input("Optional note", key="cal_note", placeholder="e.g., ‘Hold venetoclax if ANC < …’")
-
-        cal_title = (st.session_state.get("cal_title") or reg.name).strip()
-
-        # Don’t mutate the bank regimen name; just swap the title for preview/export
-        reg_for_preview = Regimen(
-            name=cal_title,
-            disease_state=reg.disease_state,
-            on_study=reg.on_study,
-            notes=reg.notes,
-            therapies=reg.therapies,
-        )
-
+    with left:
+        st.subheader("Preview")
         render_calendar_preview(
             reg=reg_for_preview,
             start=st.session_state["cal_start"],
@@ -715,17 +916,28 @@ def page_calendar(bank: RegimenBank) -> None:
             note=(st.session_state["cal_note"].strip() or None),
         )
 
-    with col_export:
-        st.subheader("3) Export")
-        st.write("Generates a formatted calendar matching the preview.")
+    with right:
+        st.subheader("Export")
+        st.caption("Generates a formatted calendar matching the preview.")
 
-        cycle_num = st.session_state["cal_cycle_num"] if st.session_state["cal_phase"] == "Cycle" else None
-        label = _cycle_label_from_inputs(st.session_state["cal_phase"], cycle_num)
+        st.markdown("**Summary**")
+        meta = []
+        meta.append("On study" if reg.on_study else "Off protocol")
+        if reg.disease_state:
+            meta.append(reg.disease_state)
+        st.write(f"**Regimen:** {reg.name}")
+        st.write(f"**Doc title:** {cal_title}")
+        st.write(f"**Start:** {st.session_state['cal_start'].isoformat()}")
+        st.write(f"**Cycle length:** {int(st.session_state['cal_cycle_len'])} days")
+        st.write(f"**Label:** {label}")
+        if meta:
+            st.caption(" • ".join(meta))
+
+        st.markdown("---")
 
         if st.button("Generate calendar", type="primary", use_container_width=True, key="cal_generate"):
             tmp_path = Path("calendar_preview.docx")
 
-            cal_title = (st.session_state.get("cal_title") or reg.name).strip()
             reg_for_export = Regimen(
                 name=cal_title,
                 disease_state=reg.disease_state,
@@ -758,6 +970,15 @@ def page_calendar(bank: RegimenBank) -> None:
                     use_container_width=True,
                 )
 
+        if st.button("Edit schedule", use_container_width=True):
+            st.session_state["cal_step"] = 2
+            st.rerun()
+
+        if st.button("Pick different regimen", use_container_width=True):
+            st.session_state["cal_step"] = 1
+            st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------- main ----------------
 def main() -> None:
@@ -779,6 +1000,8 @@ def main() -> None:
 
         if st.button("Calendar Generator", type="primary" if section == "Calendar Generator" else "secondary", use_container_width=True, key="nav_calendar"):
             st.session_state["section"] = "Calendar Generator"
+            # If user comes in fresh, default to step 1
+            st.session_state.setdefault("cal_step", 1)
             st.rerun()
 
     bank = get_bank()
