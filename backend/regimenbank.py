@@ -632,7 +632,8 @@ def export_calendar_docx(
     right_p = right_cell.paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    logo = Path("ucm.png")
+    BASE_DIR = Path(__file__).resolve().parent
+    logo = BASE_DIR / "ucm.png"
     if logo.exists():
         try:
             right_p.add_run().add_picture(str(logo), height=Inches(0.76))
