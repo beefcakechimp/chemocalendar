@@ -15,4 +15,5 @@ Thumbs.db
 
 .next
 
-backend/.venv
+backend/.venv/
+frontend/.next/
