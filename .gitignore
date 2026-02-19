@@ -1,10 +1,33 @@
-# Ignore node_modules directory
+# ---- Node / Next.js ----
 node_modules/
-.venv/
-# Ignore log files
+.next/
+out/
+dist/
 *.log
-# Ignore environment variables
-.env.local
-.next
-__pycache__
-/old
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js env/build artifacts
+.next/cache/
+.vercel/
+
+# ---- Python / venv ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- OS/editor junk ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
