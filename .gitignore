@@ -1,5 +1,5 @@
 # Ignore node_modules directory
-frontend/node_modules
+/workspaces/chemocalendar/node_modules
 
 # Ignore log files
 *.log
@@ -9,11 +9,11 @@ frontend/node_modules
 Thumbs.db
 
 # Ignore environment variables
-.env
 
-.venv
+/workspaces/chemocalendar/frontend/.env.local
+/workspaces/chemocalendar/backend/.venv
 
 .next
 
 backend/.venv/
-frontend/.next/
+/workspaces/chemocalendar/frontend/.next/
