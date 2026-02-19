@@ -1,19 +1,10 @@
 # Ignore node_modules directory
-/workspaces/chemocalendar/node_modules
-
+node_modules/
+.venv/
 # Ignore log files
 *.log
-
-# Ignore OS-specific files
-.DS_Store
-Thumbs.db
-
 # Ignore environment variables
-
-/workspaces/chemocalendar/frontend/.env.local
-/workspaces/chemocalendar/backend/.venv
-
+.env.local
 .next
-
-backend/.venv/
-/workspaces/chemocalendar/frontend/.next/
+__pycache__
+/old
