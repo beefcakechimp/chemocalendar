@@ -30,4 +30,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 .vscode/
-.idea/
+.idea/# Node / Next
+node_modules/
+.next/
+
+# Python venv
+.venv/
