@@ -30,11 +30,11 @@ app = FastAPI(title="Chemo Calendar API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"https://.*\.app\.github\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # single-tenant DB for now
 BANK = RegimenBank(DEFAULT_DB)
 

@@ -1,6 +1,12 @@
 import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen } from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+/**
+ * All requests go to /api/* on the same origin (port 3000).
+ * Next.js rewrites these server-side to http://localhost:8000/*
+ * so the browser never needs direct access to port 8000.
+ * This works on hospital/enterprise networks that block unknown ports.
+ */
+const API_BASE = "/api";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
