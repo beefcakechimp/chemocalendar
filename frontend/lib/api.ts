@@ -3,8 +3,6 @@ import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen } from "@/lib/
 /**
  * All requests go to /api/* on the same origin (port 3000).
  * Next.js rewrites these server-side to http://localhost:8000/*
- * so the browser never needs direct access to port 8000.
- * This works on hospital/enterprise networks that block unknown ports.
  */
 const API_BASE = "/api";
 
@@ -36,6 +34,26 @@ export function listRegimens(): Promise<string[]> {
 
 export function getRegimen(name: string): Promise<Regimen> {
   return apiFetch<Regimen>(`/regimens/${encodeURIComponent(name)}`);
+}
+
+export function upsertRegimen(body: Regimen): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>("/regimens", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteRegimen(name: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/regimens/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+}
+
+export function renameRegimen(old_name: string, new_name: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>("/regimens/rename", {
+    method: "POST",
+    body: JSON.stringify({ old_name, new_name }),
+  });
 }
 
 export function previewCalendar(body: CalendarPreviewRequest): Promise<CalendarPreviewResponse> {
