@@ -26,17 +26,23 @@ from .calendar_service import build_preview
 
 app = FastAPI(title="Chemo Calendar API")
 
-# Local dev: allow Next.js dev server
+# Allow requests from:
+#   - Local dev (localhost:3000, Codespaces)
+#   - Railway production frontend (*.railway.app, *.up.railway.app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
-    allow_origin_regex=r"https://.*\.app\.github\.dev",
+    allow_origin_regex=r"https://.*\.(railway\.app|up\.railway\.app|app\.github\.dev)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# single-tenant DB for now
-BANK = RegimenBank(DEFAULT_DB)
+
+# Use /data/regimenbank.db when running on Railway (persistent volume),
+# otherwise fall back to the local default.
+import os
+_db_path = Path(os.environ.get("DB_PATH", str(DEFAULT_DB)))
+BANK = RegimenBank(_db_path)
 
 
 def _to_regimen(rin: RegimenIn) -> Regimen:
@@ -187,7 +193,7 @@ def calendar_preview(req: CalendarPreviewRequest):
         regimen_title=reg_for_preview.name,
         first_sun=first_sun.isoformat(),
         last_sat=last_sat.isoformat(),
-        grid=grid,  # already iso strings inside
+        grid=grid,
     )
 
 
@@ -216,7 +222,7 @@ def calendar_export(req: CalendarPreviewRequest):
         therapies=reg.therapies,
     )
 
-    tmp_path = Path("_calendar_export.docx")
+    tmp_path = Path("/tmp/_calendar_export.docx")
     ok = export_calendar_docx(
         reg=reg_for_export,
         start=start,
