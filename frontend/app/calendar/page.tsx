@@ -61,7 +61,7 @@ function FieldHint({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function CalendarPage() {
+function CalendarPageInner() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
 
@@ -146,7 +146,6 @@ export default function CalendarPage() {
 
   return (
     <Box>
-      {/* Page header */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 700, color: "#0f172a", mb: 0.5 }}>
           Calendar Generator
@@ -163,12 +162,10 @@ export default function CalendarPage() {
       )}
 
       <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="flex-start">
-        {/* LEFT: Inputs panel */}
         <Box sx={{ width: { xs: "100%", lg: 300 }, flexShrink: 0 }}>
           <Card variant="outlined">
             <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
 
-              {/* REGIMEN */}
               <SectionLabel>Regimen</SectionLabel>
               <FormControl fullWidth size="small">
                 <InputLabel>Select regimen</InputLabel>
@@ -184,7 +181,6 @@ export default function CalendarPage() {
                 </Select>
               </FormControl>
 
-              {/* Regimen metadata badge */}
               {regimen && (
                 <Box sx={{ mt: 1, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mb: therapyCount > 0 ? 1 : 0 }}>
@@ -211,18 +207,7 @@ export default function CalendarPage() {
                     <Box>
                       {regimen.therapies.map((t, i) => (
                         <Box key={i} sx={{ display: "flex", alignItems: "baseline", gap: 0.75, mt: 0.5 }}>
-                          <Box
-                            component="span"
-                            sx={{
-                              display: "inline-block",
-                              width: 5,
-                              height: 5,
-                              borderRadius: "50%",
-                              background: "#0f4c81",
-                              flexShrink: 0,
-                              mt: 0.5,
-                            }}
-                          />
+                          <Box component="span" sx={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "#0f4c81", flexShrink: 0, mt: 0.5 }} />
                           <Typography sx={{ fontSize: "0.75rem", color: "#334155", lineHeight: 1.4 }}>
                             <strong>{t.name}</strong> — {t.dose} {t.route}, {t.duration}
                           </Typography>
@@ -235,35 +220,23 @@ export default function CalendarPage() {
 
               <Divider sx={{ my: 2 }} />
 
-              {/* SCHEDULE */}
               <SectionLabel>Schedule</SectionLabel>
 
               <TextField
-                fullWidth
-                size="small"
-                label="Document title"
-                value={title}
+                fullWidth size="small" label="Document title" value={title}
                 onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }}
                 sx={{ mb: 1.25 }}
               />
 
               <Stack direction="row" spacing={1} sx={{ mb: 1.25 }}>
                 <TextField
-                  fullWidth
-                  size="small"
-                  label="Start date"
-                  type="date"
-                  value={startDate}
+                  fullWidth size="small" label="Start date" type="date" value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   InputLabelProps={{ shrink: true }}
                 />
                 <Tooltip title="Total days in one treatment cycle" placement="top">
                   <TextField
-                    fullWidth
-                    size="small"
-                    label="Cycle length"
-                    type="number"
-                    value={cycleLen}
+                    fullWidth size="small" label="Cycle length" type="number" value={cycleLen}
                     onChange={(e) => setCycleLen(Math.max(1, Number(e.target.value)))}
                     inputProps={{ min: 1 }}
                   />
@@ -279,11 +252,7 @@ export default function CalendarPage() {
                   </Select>
                 </FormControl>
                 <TextField
-                  fullWidth
-                  size="small"
-                  label="Cycle #"
-                  type="number"
-                  value={cycleNum}
+                  fullWidth size="small" label="Cycle #" type="number" value={cycleNum}
                   disabled={phase !== "Cycle"}
                   onChange={(e) => setCycleNum(Math.max(1, Number(e.target.value)))}
                   inputProps={{ min: 1 }}
@@ -292,13 +261,9 @@ export default function CalendarPage() {
 
               <Divider sx={{ my: 2 }} />
 
-              {/* NOTE */}
               <SectionLabel>Optional Note</SectionLabel>
               <TextField
-                fullWidth
-                size="small"
-                multiline
-                rows={2}
+                fullWidth size="small" multiline rows={2}
                 placeholder="e.g., Hold venetoclax if ANC < 500…"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -307,12 +272,9 @@ export default function CalendarPage() {
 
               <Divider sx={{ my: 2 }} />
 
-              {/* ACTIONS */}
               <Stack spacing={1}>
                 <Button
-                  variant="contained"
-                  fullWidth
-                  onClick={runPreview}
+                  variant="contained" fullWidth onClick={runPreview}
                   disabled={busy || !regimenName}
                   startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null}
                   sx={{ py: 1 }}
@@ -320,9 +282,7 @@ export default function CalendarPage() {
                   {busy ? "Generating…" : "Generate Preview"}
                 </Button>
                 <Button
-                  variant="outlined"
-                  fullWidth
-                  onClick={runExport}
+                  variant="outlined" fullWidth onClick={runExport}
                   disabled={exportBusy || !regimenName}
                   startIcon={exportBusy ? <CircularProgress size={14} /> : null}
                   sx={{ py: 1 }}
@@ -335,11 +295,9 @@ export default function CalendarPage() {
           </Card>
         </Box>
 
-        {/* RIGHT: Preview panel */}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Card variant="outlined" sx={{ minHeight: 480 }}>
             <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
-              {/* Preview header */}
               <Box sx={{ px: 2.5, py: 2, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
                 <Box>
                   {preview ? (
@@ -348,15 +306,9 @@ export default function CalendarPage() {
                         <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
                           {preview.regimen_title}
                         </Typography>
-                        <Chip
-                          label={preview.label}
-                          size="small"
-                          sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700, background: "#0f4c81", color: "#fff" }}
-                        />
+                        <Chip label={preview.label} size="small" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700, background: "#0f4c81", color: "#fff" }} />
                       </Box>
-                      <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>
-                        {preview.header}
-                      </Typography>
+                      <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>{preview.header}</Typography>
                       {note.trim() && (
                         <Typography sx={{ fontSize: "0.78rem", color: "#b45309", fontStyle: "italic", mt: 0.25 }}>
                           {note.trim()}
@@ -368,19 +320,12 @@ export default function CalendarPage() {
                   )}
                 </Box>
                 {preview && (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={runExport}
-                    disabled={exportBusy}
-                    sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                  >
+                  <Button size="small" variant="outlined" onClick={runExport} disabled={exportBusy} sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>
                     Export DOCX
                   </Button>
                 )}
               </Box>
 
-              {/* Calendar grid */}
               <Box sx={{ p: 2, overflowX: "auto" }}>
                 {!preview && !busy && (
                   <Box sx={{ textAlign: "center", py: 8 }}>
@@ -393,15 +338,12 @@ export default function CalendarPage() {
                 {busy && (
                   <Box sx={{ textAlign: "center", py: 8 }}>
                     <CircularProgress size={32} sx={{ color: "#0f4c81" }} />
-                    <Typography sx={{ color: "#94a3b8", fontSize: "0.875rem", mt: 1.5 }}>
-                      Generating calendar…
-                    </Typography>
+                    <Typography sx={{ color: "#94a3b8", fontSize: "0.875rem", mt: 1.5 }}>Generating calendar…</Typography>
                   </Box>
                 )}
                 {preview && !busy && <CalendarGrid grid={preview.grid} />}
               </Box>
 
-              {/* Legend */}
               {preview && (
                 <Box sx={{ px: 2.5, pb: 2, pt: 0 }}>
                   <Divider sx={{ mb: 1.5 }} />
@@ -415,7 +357,6 @@ export default function CalendarPage() {
             </CardContent>
           </Card>
 
-          {/* Therapy summary */}
           {regimen && regimen.therapies.length > 0 && (
             <Card variant="outlined" sx={{ mt: 2 }}>
               <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
@@ -428,23 +369,8 @@ export default function CalendarPage() {
                     width: "100%",
                     borderCollapse: "collapse",
                     fontSize: "0.8rem",
-                    "& th": {
-                      textAlign: "left",
-                      fontWeight: 600,
-                      color: "#64748b",
-                      fontSize: "0.7rem",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      pb: 0.75,
-                      borderBottom: "1px solid #e2e8f0",
-                    },
-                    "& td": {
-                      py: 0.875,
-                      pr: 2,
-                      verticalAlign: "top",
-                      borderBottom: "1px solid #f1f5f9",
-                      color: "#334155",
-                    },
+                    "& th": { textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", pb: 0.75, borderBottom: "1px solid #e2e8f0" },
+                    "& td": { py: 0.875, pr: 2, verticalAlign: "top", borderBottom: "1px solid #f1f5f9", color: "#334155" },
                     "& tr:last-child td": { borderBottom: "none" },
                   }}
                 >
@@ -462,9 +388,7 @@ export default function CalendarPage() {
                     {regimen.therapies.map((t, i) => (
                       <tr key={i}>
                         <Box component="td" sx={{ fontWeight: 600, color: "#0f172a" }}>{t.name}</Box>
-                        <Box component="td">
-                          <Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }} />
-                        </Box>
+                        <Box component="td"><Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }} /></Box>
                         <Box component="td">{t.dose}</Box>
                         <Box component="td">{t.frequency}</Box>
                         <Box component="td">{t.duration}</Box>
@@ -512,28 +436,12 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
         <thead>
           <tr>
             {DAYS.map((d) => (
-              <Box
-                component="th"
-                key={d}
-                sx={{
-                  py: 1,
-                  px: 0.75,
-                  textAlign: "center",
-                  background: "#0f4c81",
-                  color: "white",
-                  fontWeight: 600,
-                  fontSize: "0.75rem",
-                  letterSpacing: "0.04em",
-                  borderRight: "1px solid rgba(255,255,255,0.1)",
-                  "&:last-child": { borderRight: "none" },
-                }}
-              >
+              <Box component="th" key={d} sx={{ py: 1, px: 0.75, textAlign: "center", background: "#0f4c81", color: "white", fontWeight: 600, fontSize: "0.75rem", letterSpacing: "0.04em", borderRight: "1px solid rgba(255,255,255,0.1)", "&:last-child": { borderRight: "none" } }}>
                 {d}
               </Box>
             ))}
           </tr>
         </thead>
-
         <tbody>
           {grid.map((week, wi) => (
             <tr key={wi}>
@@ -543,80 +451,22 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
                 const isRest = hasLabels && cell.labels.every((l) => l.toLowerCase() === "rest");
                 const isTreatment = isActive && hasLabels && !isRest;
                 const isLast = wi === grid.length - 1;
-
                 return (
-                  <Box
-                    component="td"
-                    key={ci}
-                    sx={{
-                      verticalAlign: "top",
-                      minWidth: 80,
-                      height: 100,
-                      p: 0.75,
-                      background: isTreatment
-                        ? "#eff6ff"
-                        : isRest
-                        ? "#f0fdf4"
-                        : isActive
-                        ? "#fafafa"
-                        : "#fff",
-                      borderRight: ci < 6 ? "1px solid #e2e8f0" : "none",
-                      borderBottom: !isLast ? "1px solid #e2e8f0" : "none",
-                      transition: "background 0.1s",
-                    }}
-                  >
-                    {/* Date */}
-                    <Typography
-                      sx={{
-                        textAlign: "right",
-                        fontWeight: 700,
-                        fontSize: "0.8rem",
-                        color: isActive ? "#0f172a" : "#cbd5e1",
-                        lineHeight: 1,
-                        mb: 0.5,
-                      }}
-                    >
+                  <Box component="td" key={ci} sx={{ verticalAlign: "top", minWidth: 80, height: 100, p: 0.75, background: isTreatment ? "#eff6ff" : isRest ? "#f0fdf4" : isActive ? "#fafafa" : "#fff", borderRight: ci < 6 ? "1px solid #e2e8f0" : "none", borderBottom: !isLast ? "1px solid #e2e8f0" : "none", transition: "background 0.1s" }}>
+                    <Typography sx={{ textAlign: "right", fontWeight: 700, fontSize: "0.8rem", color: isActive ? "#0f172a" : "#cbd5e1", lineHeight: 1, mb: 0.5 }}>
                       {dayjs(cell.date).format("MMM D")}
                     </Typography>
-
                     {isActive && (
                       <>
-                        {/* Day number */}
-                        <Typography
-                          sx={{
-                            fontSize: "0.68rem",
-                            color: "#94a3b8",
-                            fontStyle: "italic",
-                            lineHeight: 1,
-                            mb: 0.5,
-                          }}
-                        >
+                        <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", fontStyle: "italic", lineHeight: 1, mb: 0.5 }}>
                           Day {cell.cycle_day}
                         </Typography>
-
-                        {/* Labels */}
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
                           {(cell.labels || []).map((lab, idx) => {
                             const rest = lab.toLowerCase() === "rest";
                             return (
-                              <Box
-                                key={idx}
-                                sx={{
-                                  px: 0.5,
-                                  py: 0.2,
-                                  borderRadius: "3px",
-                                  background: rest ? "#dcfce7" : "#dbeafe",
-                                  display: "inline-flex",
-                                }}
-                              >
-                                <Typography
-                                  sx={{
-                                    fontSize: "0.68rem",
-                                    fontWeight: rest ? 500 : 700,
-                                    color: rest ? "#15803d" : "#1d4ed8",
-                                    lineHeight: 1.3,
-                                  }}
-                                >
+                              <Box key={idx} sx={{ px: 0.5, py: 0.2, borderRadius: "3px", background: rest ? "#dcfce7" : "#dbeafe", display: "inline-flex" }}>
+                                <Typography sx={{ fontSize: "0.68rem", fontWeight: rest ? 500 : 700, color: rest ? "#15803d" : "#1d4ed8", lineHeight: 1.3 }}>
                                   {lab}
                                 </Typography>
                               </Box>
@@ -633,5 +483,13 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
         </tbody>
       </Box>
     </Box>
+  );
+}
+
+export default function CalendarPage() {
+  return (
+    <React.Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}>
+      <CalendarPageInner />
+    </React.Suspense>
   );
 }
