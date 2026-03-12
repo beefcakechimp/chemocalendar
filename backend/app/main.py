@@ -7,7 +7,7 @@ from typing import List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+#from fastapi.responses import StreamingResponse
 
 from regimenbank import (
     RegimenBank,
@@ -34,7 +34,6 @@ frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[frontend_url],
-   # allow_origins=["http://localhost:3000"],
     allow_origin_regex=r"https://.*\.(railway\.app|up\.railway\.app|app\.github\.dev)",
     allow_credentials=True,
     allow_methods=["*"],
