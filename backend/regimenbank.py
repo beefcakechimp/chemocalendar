@@ -882,7 +882,7 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
         print(f"  Current name '{reg.name}' does not yet exist in regimen bank.")
 
     # Keep the safe option first
-    print("  1. Save As (create NEW regimen)")
+    print("  1. Save As")
     if exists:
         print(f"  2. Save (OVERWRITE existing '{reg.name}')")
     else:
@@ -903,9 +903,9 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
                 if new_exists:
                     print(f"A regimen named '{new_name}' already exists.")
                     confirm = input(
-                        "Overwrite it? Type 'yes' to confirm, or anything else to cancel: "
+                        "Overwrite it? Type 'y' to confirm, or anything else to cancel: "
                     ).strip().lower()
-                    if confirm != "yes":
+                    if confirm != "y":
                         print("Overwrite cancelled. Choose a different name.")
                         continue
 
@@ -917,9 +917,9 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
             if exists:
                 print(f"WARNING: This will overwrite existing regimen '{reg.name}'.")
                 confirm = input(
-                    "Type 'yes' to overwrite, or anything else to cancel: "
+                    "Type '' to overwrite, or anything else to cancel: "
                 ).strip().lower()
-                if confirm != "yes":
+                if confirm != "y":
                     print("Overwrite cancelled.")
                     continue
             bank.upsert_regimen(reg)
@@ -939,9 +939,9 @@ def _ask_on_study(current: bool) -> bool:
     """
     Prompt user to classify regimen as off protocol vs on-study.
     """
-    print("\nIs this regimen on a research protocol (IRB/CIRB)?")
+    print("\nresearch protocol (IRB/CIRB)?")
     print("  1. Off protocol")
-    print("  2. On study (IRB/CIRB)")
+    print("  2. IRB or CIRB")
     default = "2" if current else "1"
     while True:
         s = input(f"Select [1-2] (Enter for {default}): ").strip()
@@ -963,10 +963,10 @@ def wizard(bank: RegimenBank) -> None:
     reg = bank.get_regimen(rname) if not is_new else Regimen(name=rname)
 
     if is_new or reg is None:
-        print(f"\nCreating NEW regimen '{rname}'.")
+        print(f"\nCreating regimen '{rname}'.")
         reg = reg or Regimen(name=rname)
     else:
-        print(f"\nEditing EXISTING regimen '{rname}'.")
+        print(f"\nEditing regimen '{rname}'.")
         print(
             "Hint: Use 'Persist → Save As' if you want to create a new regimen (e.g., 7+3 → 7+3+ven)."
         )

@@ -222,7 +222,7 @@ def calendar_export(req: CalendarPreviewRequest):
         therapies=reg.therapies,
     )
 
-    tmp_path = Path("/tmp/_calendar_export.docx")
+    tmp_path = Path("/_calendar_export.docx")
     ok = export_calendar_docx(
         reg=reg_for_export,
         start=start,
