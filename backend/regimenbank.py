@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------- config ----------------
 SCHEMA_VERSION = 3
-DEFAULT_DB = Path("regimenbank.db")
+DEFAULT_DB = Path("backend/regimenbank.db")
 ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
 # ---------------- console style (notes only on selection) ----------------
