@@ -7,7 +7,7 @@ from typing import List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-#from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from regimenbank import (
     RegimenBank,
