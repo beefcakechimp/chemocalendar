@@ -1,5 +1,4 @@
 FROM node:20-alpine AS builder
-
 WORKDIR /app
 
 # Install dependencies
@@ -8,21 +7,16 @@ RUN npm ci
 
 # Copy source and build
 COPY . .
-
-# BACKEND_URL is injected at build time via --build-arg
-ARG BACKEND_URL=http://backend:8000
-ENV BACKEND_URL=$BACKEND_URL
-
 RUN npm run build
 
 # ── Production image ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS runner
-
 WORKDIR /app
 
 ENV NODE_ENV=production
+# Expose the variable so the Next.js standalone server can read it at runtime
+ENV BACKEND_URL=http://backend:8000 
 
-# Copy built output from builder
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

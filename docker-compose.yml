@@ -1,5 +1,4 @@
 services:
-
   backend:
     build:
       context: ./backend
@@ -7,11 +6,12 @@ services:
     environment:
       - DB_PATH=/data/regimenbank.db
     volumes:
-      - db_data:/data          # persistent database — survives container restarts
+      - db_data:/data
     ports:
-      - "8000:8000"            # optional: expose for direct API access / debugging
+      - "8000:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Use python's built-in urllib instead of curl
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -19,11 +19,10 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        # Uses Docker's internal DNS — frontend container talks to backend container
-        # directly without going through the host network
-        BACKEND_URL: http://backend:8000
     restart: unless-stopped
+    environment:
+      # Inject the runtime environment variable directly
+      - BACKEND_URL=http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
@@ -31,4 +30,4 @@ services:
         condition: service_healthy
 
 volumes:
-  db_data:       # named volume — Docker manages storage, data persists across restarts
+  db_data:

@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import os
 import datetime as dt
 import io
 from pathlib import Path
@@ -26,11 +26,14 @@ from .calendar_service import build_preview
 
 app = FastAPI(title="Chemo Calendar API")
 
+# Read allowed origins from environment, default to localhost
+frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 # Allow requests from:
 #   - Local dev (localhost:3000, Codespaces)
 #   - Railway production frontend (*.railway.app, *.up.railway.app)
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=[frontend_url],
     allow_origins=["http://localhost:3000"],
     allow_origin_regex=r"https://.*\.(railway\.app|up\.railway\.app|app\.github\.dev)",
     allow_credentials=True,
