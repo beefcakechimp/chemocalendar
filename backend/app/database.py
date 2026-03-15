@@ -19,7 +19,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from regimenbank import RegimenBank
+from backend.app.regimenbank import RegimenBank
 
 logger = logging.getLogger(__name__)
 

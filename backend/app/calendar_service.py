@@ -4,7 +4,7 @@ import calendar as pycal
 import datetime as dt
 from typing import Any, Dict, List, Optional, Tuple
 
-from regimenbank import Regimen, compute_calendar_grid
+from backend.app.regimenbank import Regimen, compute_calendar_grid
 
 
 def _format_month_year_range(first_sun: dt.date, last_sat: dt.date) -> str:
