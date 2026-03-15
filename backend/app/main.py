@@ -19,7 +19,7 @@ from backend.app.regimenbank import (
     RegimenBank,
     export_calendar_docx,
 )
-from .database import close_bank, get_bank, validate_db
+from ..database import close_bank, get_bank, validate_db
 from .schemas import (
     CalendarPreviewRequest,
     CalendarPreviewResponse,
