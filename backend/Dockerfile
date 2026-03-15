@@ -6,6 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY . .
+
 # Create directories for DB volume and temp files
 # /data is the mount point for persistent storage
 # /tmp is used for DOCX export temp files
