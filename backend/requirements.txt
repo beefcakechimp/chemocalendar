@@ -1,4 +1,4 @@
 fastapi
+python-docx
 uvicorn[standard]
 pydantic
-python-docx
