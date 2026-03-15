@@ -1,51 +1,65 @@
 from __future__ import annotations
-import os
+
 import datetime as dt
 import io
+import logging
+import os
+import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from regimenbank import (
-    RegimenBank,
-    Regimen,
     Chemotherapy,
+    Regimen,
+    RegimenBank,
     export_calendar_docx,
-    DEFAULT_DB,
 )
+from .database import close_bank, get_bank, validate_db
 from .schemas import (
-    RegimenIn,
-    RenameRegimenRequest,
     CalendarPreviewRequest,
     CalendarPreviewResponse,
+    RegimenIn,
+    RenameRegimenRequest,
 )
 from .calendar_service import build_preview
 
-app = FastAPI(title="Chemo Calendar API")
+logger = logging.getLogger(__name__)
 
-# Read allowed origins from environment, default to localhost
+
+# ── Lifecycle ──────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Validate DB on startup; close cleanly on shutdown."""
+    if not validate_db():
+        logger.error("Database validation failed — check DB_PATH and volume mount")
+        # Don't raise here; let the health check report unhealthy
+    yield
+    close_bank()
+
+
+# ── App ────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Chemo Calendar API", lifespan=lifespan)
+
+# CORS: explicit origin for the frontend, plus Railway/Codespaces patterns
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-# Allow requests from:
-#   - Local dev (localhost:3000, Codespaces)
-#   - Railway production frontend (*.railway.app, *.up.railway.app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[frontend_url],
-    allow_origin_regex=r"https://.*\.(railway\.app|up\.railway\.app|app\.github\.dev)",
+    allow_origin_regex=r"https://.*\.(railway\.app|up\.railway\.app|app\.github\.dev|fly\.dev)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Use /data/regimenbank.db when running on Railway (persistent volume),
-# otherwise fall back to the local default.
-import os
-_db_path = Path(os.environ.get("DB_PATH", str(DEFAULT_DB)))
-BANK = RegimenBank(_db_path)
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _to_regimen(rin: RegimenIn) -> Regimen:
     therapies = [
@@ -68,7 +82,7 @@ def _to_regimen(rin: RegimenIn) -> Regimen:
     )
 
 
-def _cycle_label_from_inputs(phase: str, cycle_num: int | None) -> str:
+def _cycle_label(phase: str, cycle_num: int | None) -> str:
     if phase == "Induction":
         return "Induction"
     if cycle_num is None:
@@ -76,18 +90,17 @@ def _cycle_label_from_inputs(phase: str, cycle_num: int | None) -> str:
     return f"Cycle {cycle_num}"
 
 
-def _safe_filename_piece(s: str) -> str:
+def _safe_filename(s: str) -> str:
     s = (s or "").strip()
     if not s:
         return "calendar"
-    out = []
-    for ch in s:
-        if ch.isalnum() or ch in ("_", "-"):
-            out.append(ch)
-        elif ch.isspace():
-            out.append("_")
-    return "".join(out) or "calendar"
+    return "".join(
+        ch if ch.isalnum() or ch in ("_", "-") else ("_" if ch.isspace() else "")
+        for ch in s
+    ) or "calendar"
 
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
@@ -95,18 +108,23 @@ def root():
 
 
 @app.get("/health")
-def health():
-    return {"ok": True}
+def health(bank: RegimenBank = Depends(get_bank)):
+    """Health check that actually verifies DB connectivity."""
+    try:
+        bank.conn.execute("SELECT 1")
+        return {"ok": True, "db": "connected"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"DB unreachable: {e}")
 
 
 @app.get("/regimens", response_model=List[str])
-def list_regimens():
-    return BANK.list_regimens()
+def list_regimens(bank: RegimenBank = Depends(get_bank)):
+    return bank.list_regimens()
 
 
 @app.get("/regimens/{name}")
-def get_regimen(name: str):
-    r = BANK.get_regimen(name)
+def get_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
+    r = bank.get_regimen(name)
     if not r:
         raise HTTPException(status_code=404, detail="Regimen not found")
     return {
@@ -129,24 +147,24 @@ def get_regimen(name: str):
 
 
 @app.post("/regimens")
-def upsert_regimen(body: RegimenIn):
+def upsert_regimen(body: RegimenIn, bank: RegimenBank = Depends(get_bank)):
     reg = _to_regimen(body)
     if not reg.name:
         raise HTTPException(status_code=400, detail="Regimen name is required")
-    BANK.upsert_regimen(reg)
+    bank.upsert_regimen(reg)
     return {"ok": True}
 
 
 @app.delete("/regimens/{name}")
-def delete_regimen(name: str):
-    ok = BANK.delete_regimen(name)
+def delete_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
+    ok = bank.delete_regimen(name)
     if not ok:
         raise HTTPException(status_code=404, detail="Regimen not found")
     return {"ok": True}
 
 
 @app.post("/regimens/rename")
-def rename_regimen(body: RenameRegimenRequest):
+def rename_regimen(body: RenameRegimenRequest, bank: RegimenBank = Depends(get_bank)):
     old = body.old_name.strip()
     new = body.new_name.strip()
     if not old or not new:
@@ -154,21 +172,20 @@ def rename_regimen(body: RenameRegimenRequest):
     if old == new:
         return {"ok": True}
 
-    r = BANK.get_regimen(old)
+    r = bank.get_regimen(old)
     if not r:
         raise HTTPException(status_code=404, detail="Regimen not found")
-
-    if BANK.get_regimen(new):
+    if bank.get_regimen(new):
         raise HTTPException(status_code=409, detail="A regimen with new_name already exists")
 
-    BANK.save_as(r, new)
-    BANK.delete_regimen(old)
+    bank.save_as(r, new)
+    bank.delete_regimen(old)
     return {"ok": True}
 
 
 @app.post("/calendar/preview", response_model=CalendarPreviewResponse)
-def calendar_preview(req: CalendarPreviewRequest):
-    reg = BANK.get_regimen(req.regimen_name)
+def calendar_preview(req: CalendarPreviewRequest, bank: RegimenBank = Depends(get_bank)):
+    reg = bank.get_regimen(req.regimen_name)
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
 
@@ -200,8 +217,8 @@ def calendar_preview(req: CalendarPreviewRequest):
 
 
 @app.post("/calendar/export")
-def calendar_export(req: CalendarPreviewRequest):
-    reg = BANK.get_regimen(req.regimen_name)
+def calendar_export(req: CalendarPreviewRequest, bank: RegimenBank = Depends(get_bank)):
+    reg = bank.get_regimen(req.regimen_name)
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
 
@@ -213,9 +230,9 @@ def calendar_export(req: CalendarPreviewRequest):
     if int(req.cycle_len) < 1:
         raise HTTPException(status_code=400, detail="cycle_len must be >= 1")
 
-    label = _cycle_label_from_inputs(req.phase, req.cycle_num)
-
+    label = _cycle_label(req.phase, req.cycle_num)
     doc_title = (req.title_override or reg.name).strip() or reg.name
+
     reg_for_export = Regimen(
         name=doc_title,
         disease_state=reg.disease_state,
@@ -224,26 +241,31 @@ def calendar_export(req: CalendarPreviewRequest):
         therapies=reg.therapies,
     )
 
-    tmp_path = Path("/_calendar_export.docx")
-    ok = export_calendar_docx(
-        reg=reg_for_export,
-        start=start,
-        cycle_len=int(req.cycle_len),
-        out_path=tmp_path,
-        cycle_label=label,
-        note=(req.note.strip() if req.note else None),
-    )
-    if not ok:
-        raise HTTPException(status_code=500, detail="Export failed (python-docx missing or export error).")
+    # Write to a proper temp file instead of root filesystem
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
 
-    data = tmp_path.read_bytes()
     try:
-        tmp_path.unlink(missing_ok=True)
-    except Exception:
-        pass
+        ok = export_calendar_docx(
+            reg=reg_for_export,
+            start=start,
+            cycle_len=int(req.cycle_len),
+            out_path=tmp_path,
+            cycle_label=label,
+            note=(req.note.strip() if req.note else None),
+        )
+        if not ok:
+            raise HTTPException(
+                status_code=500,
+                detail="Export failed (python-docx missing or export error).",
+            )
 
-    safe_title = _safe_filename_piece(doc_title)
-    safe_label = _safe_filename_piece(label.replace(" ", ""))
+        data = tmp_path.read_bytes()
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    safe_title = _safe_filename(doc_title)
+    safe_label = _safe_filename(label.replace(" ", ""))
     filename = f"{safe_title}_{safe_label}_{start.isoformat()}.docx"
 
     return StreamingResponse(

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------- config ----------------
 SCHEMA_VERSION = 3
-DEFAULT_DB = Path(__file__).parent / "regimenbank.db"
+DEFAULT_DB = Path(__file__).resolve().parent / "regimenbank.db"
 ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
 # ---------------- console style (notes only on selection) ----------------
@@ -106,6 +106,7 @@ class RegimenBank:
         self.conn.row_factory = sqlite3.Row
         # enforce FK constraints
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA busy_timeout = 5000")  # 5s retry on lock
         self._init_schema()
 
     def _init_schema(self) -> None:

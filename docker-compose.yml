@@ -5,23 +5,23 @@ services:
     restart: unless-stopped
     environment:
       - DB_PATH=/data/regimenbank.db
+      - FRONTEND_URL=http://localhost:3000
     volumes:
       - db_data:/data
     ports:
       - "8000:8000"
     healthcheck:
-      # Use python's built-in urllib instead of curl
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s  # give the app time to boot
 
   frontend:
     build:
       context: ./frontend
     restart: unless-stopped
     environment:
-      # Inject the runtime environment variable directly
       - BACKEND_URL=http://backend:8000
     ports:
       - "3000:3000"
