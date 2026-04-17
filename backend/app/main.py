@@ -19,7 +19,7 @@ from .regimenbank import (
     RegimenBank,
     export_calendar_docx,
 )
-from .pg_bank import close_bank, get_bank, validate_db
+from .pg_bank import (close_bank, get_bank, validate_db)
 from .schemas import (
     CalendarPreviewRequest,
     CalendarPreviewResponse,
