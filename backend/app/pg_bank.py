@@ -22,7 +22,7 @@ from typing import List, Optional
 
 from psycopg_pool import ConnectionPool
 
-from regimenbank import Chemotherapy, Regimen, parse_day_spec
+from .regimenbank import Chemotherapy, Regimen, parse_day_spec
 
 
 class PgBank:
