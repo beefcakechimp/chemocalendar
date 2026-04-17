@@ -16,10 +16,9 @@ from fastapi.responses import StreamingResponse
 from .regimenbank import (
     Chemotherapy,
     Regimen,
-    RegimenBank,
     export_calendar_docx,
 )
-from .pg_bank import (close_bank, get_bank, validate_db)
+from .pg_bank import (PgBank, close_bank, get_bank, validate_db)
 from .schemas import (
     CalendarPreviewRequest,
     CalendarPreviewResponse,
@@ -108,22 +107,23 @@ def root():
 
 
 @app.get("/health")
-def health(bank: RegimenBank = Depends(get_bank)):
+def health(bank: PgBank = Depends(get_bank)):
     """Health check that actually verifies DB connectivity."""
     try:
-        bank.conn.execute("SELECT 1")
+        with bank.pool.connection() as conn:
+            conn.execute("SELECT 1")
         return {"ok": True, "db": "connected"}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"DB unreachable: {e}")
 
 
 @app.get("/regimens", response_model=List[str])
-def list_regimens(bank: RegimenBank = Depends(get_bank)):
+def list_regimens(bank: PgBank = Depends(get_bank)):
     return bank.list_regimens()
 
 
 @app.get("/regimens/{name}")
-def get_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
+def get_regimen(name: str, bank: PgBank = Depends(get_bank)):
     r = bank.get_regimen(name)
     if not r:
         raise HTTPException(status_code=404, detail="Regimen not found")
@@ -147,7 +147,7 @@ def get_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
 
 
 @app.post("/regimens")
-def upsert_regimen(body: RegimenIn, bank: RegimenBank = Depends(get_bank)):
+def upsert_regimen(body: RegimenIn, bank: PgBank = Depends(get_bank)):
     reg = _to_regimen(body)
     if not reg.name:
         raise HTTPException(status_code=400, detail="Regimen name is required")
@@ -156,7 +156,7 @@ def upsert_regimen(body: RegimenIn, bank: RegimenBank = Depends(get_bank)):
 
 
 @app.delete("/regimens/{name}")
-def delete_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
+def delete_regimen(name: str, bank: PgBank = Depends(get_bank)):
     ok = bank.delete_regimen(name)
     if not ok:
         raise HTTPException(status_code=404, detail="Regimen not found")
@@ -164,7 +164,7 @@ def delete_regimen(name: str, bank: RegimenBank = Depends(get_bank)):
 
 
 @app.post("/regimens/rename")
-def rename_regimen(body: RenameRegimenRequest, bank: RegimenBank = Depends(get_bank)):
+def rename_regimen(body: RenameRegimenRequest, bank: PgBank = Depends(get_bank)):
     old = body.old_name.strip()
     new = body.new_name.strip()
     if not old or not new:
@@ -184,7 +184,7 @@ def rename_regimen(body: RenameRegimenRequest, bank: RegimenBank = Depends(get_b
 
 
 @app.post("/calendar/preview", response_model=CalendarPreviewResponse)
-def calendar_preview(req: CalendarPreviewRequest, bank: RegimenBank = Depends(get_bank)):
+def calendar_preview(req: CalendarPreviewRequest, bank: PgBank = Depends(get_bank)):
     reg = bank.get_regimen(req.regimen_name)
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
@@ -217,7 +217,7 @@ def calendar_preview(req: CalendarPreviewRequest, bank: RegimenBank = Depends(ge
 
 
 @app.post("/calendar/export")
-def calendar_export(req: CalendarPreviewRequest, bank: RegimenBank = Depends(get_bank)):
+def calendar_export(req: CalendarPreviewRequest, bank: PgBank = Depends(get_bank)):
     reg = bank.get_regimen(req.regimen_name)
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
