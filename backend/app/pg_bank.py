@@ -16,13 +16,17 @@ Public API:
 """
 from __future__ import annotations
 
+import os
 import json
+import logging
 from dataclasses import replace
 from typing import List, Optional
 
 from psycopg_pool import ConnectionPool
 
 from .regimenbank import Chemotherapy, Regimen, parse_day_spec
+
+logger = logging.getLogger(__name__)
 
 
 class PgBank:
@@ -161,3 +165,47 @@ class PgBank:
             self.pool.close()
         except Exception:
             pass
+
+# ── Global Lifecycle Management ──────────────────────────────────────────────
+
+_bank_instance: Optional[PgBank] = None
+
+def validate_db() -> bool:
+    """Initialize the connection pool and verify DB connectivity."""
+    global _bank_instance
+    db_url = os.environ.get("DATABASE_URL")
+    
+    if not db_url:
+        logger.error("DATABASE_URL environment variable is missing.")
+        return False
+        
+    try:
+        pool = ConnectionPool(db_url)
+        # Verify connectivity by making a simple query
+        with pool.connection() as conn:
+            conn.execute("SELECT 1")
+            
+        _bank_instance = PgBank(pool)
+        return True
+    except Exception as e:
+        logger.error(f"Database validation failed: {e}")
+        return False
+
+def get_bank() -> PgBank:
+    """Dependency injected into FastAPI routes to access the DB."""
+    global _bank_instance
+    if _bank_instance is None:
+        # Fallback in case validate_db wasn't called (e.g., in some test environments)
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            raise RuntimeError("DATABASE_URL environment variable is missing.")
+        pool = ConnectionPool(db_url)
+        _bank_instance = PgBank(pool)
+    return _bank_instance
+
+def close_bank() -> None:
+    """Close the database connection pool safely."""
+    global _bank_instance
+    if _bank_instance is not None:
+        _bank_instance.close()
+        _bank_instance = None
