@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from backend.app.regimenbank import (
+from regimenbank import (
     Chemotherapy,
     Regimen,
     RegimenBank,
