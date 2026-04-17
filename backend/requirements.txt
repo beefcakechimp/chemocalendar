@@ -1,4 +1,6 @@
 fastapi
-python-docx
 uvicorn[standard]
 pydantic
+python-docx
+psycopg[binary]
+psycopg-pool

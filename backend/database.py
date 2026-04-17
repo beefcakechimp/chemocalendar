@@ -1,94 +1,54 @@
-"""
-Lazy database initialization for the Chemo Calendar API.
-
-Key design choices:
-  - DB is NOT created at import time. This avoids crashes when
-    the persistent volume isn't mounted yet (Railway, Fly.io).
-  - WAL mode is enabled for concurrent read access from multiple users.
-  - A single RegimenBank instance is reused across requests via FastAPI
-    dependency injection.
-  - Startup validation checks that the DB path is writable before
-    accepting traffic.
-"""
-
 from __future__ import annotations
 
-import logging
 import os
-import sqlite3
-from pathlib import Path
-from typing import Optional
 
-from backend.app.regimenbank import RegimenBank
+from psycopg_pool import ConnectionPool
 
-logger = logging.getLogger(__name__)
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-_bank: Optional[RegimenBank] = None
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "Set it to your Neon (or other Postgres) connection string."
+    )
 
-
-def _resolve_db_path() -> Path:
-    """Determine the database path from environment or fallback."""
-    raw = os.environ.get("DB_PATH", "")
-    if raw:
-        return Path(raw)
-    # Sensible fallback: /data if it exists (Docker volume), else local
-    if Path("/data").is_dir():
-        return Path("/data/regimenbank.db")
-    return Path("regimenbank.db")
+# Open=False so we call pool.open() explicitly in the FastAPI lifespan handler.
+pool = ConnectionPool(DATABASE_URL, min_size=1, max_size=10, open=False)
 
 
-def get_bank() -> RegimenBank:
-    """
-    Return the singleton RegimenBank, creating it on first call.
-
-    Called as a FastAPI dependency so the app doesn't crash at import
-    time if the volume isn't ready yet.
-    """
-    global _bank
-    if _bank is None:
-        db_path = _resolve_db_path()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("Opening database at %s", db_path)
-        _bank = RegimenBank(db_path)
-        _enable_wal(_bank)
-    return _bank
-
-
-def _enable_wal(bank: RegimenBank) -> None:
-    """
-    Enable WAL journal mode for better concurrent read performance.
-
-    WAL lets multiple readers proceed without blocking each other and
-    without blocking the single writer. Essential once you have 2+
-    simultaneous users.
-    """
-    try:
-        mode = bank.conn.execute("PRAGMA journal_mode=WAL").fetchone()
-        logger.info("SQLite journal mode: %s", mode[0] if mode else "unknown")
-    except Exception as e:
-        logger.warning("Could not enable WAL mode: %s", e)
-
-
-def validate_db() -> bool:
-    """
-    Quick smoke test: can we open the DB and run a trivial query?
-    Called during startup to fail fast if the volume is broken.
-    """
-    try:
-        bank = get_bank()
-        bank.conn.execute("SELECT 1")
-        return True
-    except Exception as e:
-        logger.error("Database validation failed: %s", e)
-        return False
-
-
-def close_bank() -> None:
-    """Cleanly close the DB connection on shutdown."""
-    global _bank
-    if _bank is not None:
-        try:
-            _bank.close()
-        except Exception:
-            pass
-        _bank = None
+def init_db() -> None:
+    """Open the pool and create tables if they don't exist."""
+    pool.open()
+    with pool.connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS regimens (
+                id            SERIAL PRIMARY KEY,
+                name          TEXT NOT NULL UNIQUE,
+                disease_state TEXT,
+                on_study      BOOLEAN NOT NULL DEFAULT FALSE,
+                notes         TEXT,
+                updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS therapies (
+                id          SERIAL PRIMARY KEY,
+                regimen_id  INTEGER NOT NULL
+                                REFERENCES regimens(id) ON DELETE CASCADE,
+                name        TEXT NOT NULL,
+                route       TEXT NOT NULL,
+                dose        TEXT NOT NULL,
+                frequency   TEXT NOT NULL,
+                duration    TEXT NOT NULL,
+                total_doses INTEGER
+            )
+        """)
+        # Single-row table for the groups JSON blob.
+        # The singleton=1 constraint enforces at most one row.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS regimen_groups (
+                singleton INTEGER PRIMARY KEY DEFAULT 1
+                              CHECK (singleton = 1),
+                data      JSONB NOT NULL DEFAULT '{}'
+            )
+        """)
