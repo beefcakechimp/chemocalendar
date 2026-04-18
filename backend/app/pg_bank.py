@@ -137,26 +137,41 @@ class PgBank:
 
     # ── groups ────────────────────────────────────────────────────────────────
 
-    def get_groups(self) -> dict:
+    def get_all_regimens(self) -> List[Regimen]:
+        """Fetch all regimens with their therapies in a highly efficient double-query."""
         with self.pool.connection() as conn:
-            row = conn.execute(
-                "SELECT data FROM regimen_groups WHERE singleton = 1"
-            ).fetchone()
-        if not row:
-            return {}
-        data = row[0]
-        # psycopg3 returns JSONB already parsed; guard against string just in case
-        return json.loads(data) if isinstance(data, str) else data
+            reg_rows = conn.execute(
+                "SELECT id, name, disease_state, notes, on_study FROM regimens ORDER BY name"
+            ).fetchall()
 
-    def save_groups(self, groups: dict) -> None:
-        with self.pool.connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO regimen_groups (singleton, data) VALUES (1, %s)
-                ON CONFLICT (singleton) DO UPDATE SET data = EXCLUDED.data
-                """,
-                (json.dumps(groups),),
+            if not reg_rows:
+                return []
+
+            therapy_rows = conn.execute(
+                "SELECT regimen_id, name, route, dose, frequency, duration, total_doses "
+                "FROM therapies ORDER BY id"
+            ).fetchall()
+
+        from collections import defaultdict
+        t_map = defaultdict(list)
+        for tr in therapy_rows:
+            t_map[tr[0]].append(
+                Chemotherapy(
+                    name=tr[1], route=tr[2], dose=tr[3], frequency=tr[4], duration=tr[5], total_doses=tr[6]
+                )
             )
+
+        results = []
+        for row in reg_rows:
+            results.append(Regimen(
+                name=row[1],
+                disease_state=row[2],
+                on_study=bool(row[4]),
+                notes=row[3],
+                therapies=t_map.get(row[0], [])
+            ))
+        return results
+
 
     # ── cleanup ───────────────────────────────────────────────────────────────
 

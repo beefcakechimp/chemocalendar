@@ -116,6 +116,10 @@ def health(bank: PgBank = Depends(get_bank)):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"DB unreachable: {e}")
 
+@app.get("/regimens/all", response_model=List[Regimen])
+def get_all_regimens_detailed(bank: PgBank = Depends(get_bank)):
+    """Returns every regimen fully populated with its therapies."""
+    return bank.get_all_regimens()
 
 @app.get("/regimens", response_model=List[str])
 def list_regimens(bank: PgBank = Depends(get_bank)):

@@ -4,7 +4,8 @@ import * as React from "react";
 import useSWR from "swr";
 import dayjs from "dayjs";
 import { useSearchParams } from "next/navigation";
-import { listRegimens, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
+// 1. Updated Import: We import listAllRegimensDetailed instead of listRegimens
+import { listAllRegimensDetailed, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
 import { Regimen, CalendarPreviewResponse } from "@/lib/types";
 import {
   Alert,
@@ -65,9 +66,50 @@ function CalendarPageInner() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
 
-  const { data: names, isLoading: namesLoading } = useSWR("regimens", listRegimens);
+  // 2. Fetch the detailed list of all regimens
+  const { data: allRegimens = [], isLoading: namesLoading } = useSWR("all-regimens-detailed", listAllRegimensDetailed);
 
-  const [regimenName, setRegimenName] = React.useState<string>(preselected || "");
+  // 3. New Two-Step Selection State
+  const [selectedParent, setSelectedParent] = React.useState<string>("");
+  const [selectedVariant, setSelectedVariant] = React.useState<string>("");
+
+  // 4. Smart Agent Grouping Algorithm
+  const structure = React.useMemo(() => {
+    const signatureMap: Record<string, Regimen[]> = {};
+    const standalones: Regimen[] = [];
+    const groups: Record<string, Regimen[]> = {};
+
+    allRegimens.forEach((reg) => {
+      if (!reg.therapies || reg.therapies.length === 0) {
+        standalones.push(reg);
+        return;
+      }
+      // Create signature based on alphabetical drug names
+      const sig = reg.therapies.map(t => t.name.trim().toLowerCase()).sort().join(" + ");
+      if (!signatureMap[sig]) signatureMap[sig] = [];
+      signatureMap[sig].push(reg);
+    });
+
+    Object.entries(signatureMap).forEach(([sig, regs]) => {
+      if (regs.length > 1) {
+        // Format signature to Title Case for folder name
+        const groupName = sig.replace(/\b\w/g, l => l.toUpperCase());
+        groups[groupName] = regs;
+      } else {
+        standalones.push(regs[0]);
+      }
+    });
+
+    return { groups, standalones };
+  }, [allRegimens]);
+
+  // Derived state to figure out what the user is actually looking at
+  const isGroupSelected = !!structure.groups[selectedParent];
+  const availableVariants = isGroupSelected ? structure.groups[selectedParent] : [];
+  
+  // The final string we send to the backend for previews and exports
+  const regimenName = isGroupSelected ? selectedVariant : selectedParent;
+
   const { data: regimen } = useSWR<Regimen>(
     regimenName ? ["regimen", regimenName] : null,
     () => getRegimen(regimenName)
@@ -82,11 +124,43 @@ function CalendarPageInner() {
   const [title, setTitle] = React.useState<string>("");
   const [titleDirty, setTitleDirty] = React.useState(false);
 
+  // 5. Intelligent Pre-selection (handles Dashboard clicks and default loading)
   React.useEffect(() => {
-    if (!regimenName && names && names.length) {
-      setRegimenName(preselected && names.includes(preselected) ? preselected : names[0]);
+    if (!selectedParent && allRegimens.length > 0) {
+      if (preselected) {
+        let foundGroup = "";
+        Object.entries(structure.groups).forEach(([gName, regs]) => {
+          if (regs.some(r => r.name === preselected)) foundGroup = gName;
+        });
+
+        if (foundGroup) {
+          setSelectedParent(foundGroup);
+          setSelectedVariant(preselected);
+        } else {
+          setSelectedParent(preselected);
+        }
+      } else {
+        if (structure.standalones.length > 0) {
+          setSelectedParent(structure.standalones[0].name);
+        } else if (Object.keys(structure.groups).length > 0) {
+          const firstGroup = Object.keys(structure.groups)[0];
+          setSelectedParent(firstGroup);
+          setSelectedVariant(structure.groups[firstGroup][0].name);
+        }
+      }
     }
-  }, [names, regimenName, preselected]);
+  }, [allRegimens, preselected, selectedParent, structure]);
+
+  const handleParentChange = (e: any) => {
+    const value = e.target.value;
+    setSelectedParent(value);
+    // Auto-select the first specific dose if they click a folder
+    if (structure.groups[value]) {
+      setSelectedVariant(structure.groups[value][0].name); 
+    } else {
+      setSelectedVariant("");
+    }
+  };
 
   React.useEffect(() => { setTitleDirty(false); }, [regimenName]);
   React.useEffect(() => {
@@ -167,22 +241,60 @@ function CalendarPageInner() {
             <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
 
               <SectionLabel>Regimen</SectionLabel>
-              <FormControl fullWidth size="small">
-                <InputLabel>Select regimen</InputLabel>
+              
+              {/* STEP 1: Main Dropdown */}
+              <FormControl fullWidth size="small" sx={{ mb: isGroupSelected ? 1.5 : 0 }}>
+                <InputLabel>Select regimen or group</InputLabel>
                 <Select
-                  label="Select regimen"
-                  value={regimenName}
-                  onChange={(e) => setRegimenName(e.target.value)}
+                  label="Select regimen or group"
+                  value={selectedParent}
+                  onChange={handleParentChange}
                   disabled={namesLoading}
                 >
-                  {(names || []).map((n) => (
-                    <MenuItem key={n} value={n}>{n}</MenuItem>
-                  ))}
+                  {Object.keys(structure.groups).length > 0 && [
+                    <MenuItem key="header-groups" disabled sx={{ fontWeight: 700, color: '#0f4c81', opacity: 1 }}>
+                      DRUG COMBINATIONS (Select to pick dose)
+                    </MenuItem>,
+                    ...Object.keys(structure.groups).map((g) => (
+                      <MenuItem key={`group-${g}`} value={g} sx={{ pl: 3 }}>
+                        📁 {g}
+                      </MenuItem>
+                    ))
+                  ]}
+
+                  {structure.standalones.length > 0 && [
+                    <MenuItem key="header-standalones" disabled sx={{ fontWeight: 700, color: '#0f4c81', opacity: 1, mt: 1 }}>
+                      STANDALONE REGIMENS
+                    </MenuItem>,
+                    ...structure.standalones.map((reg) => (
+                      <MenuItem key={`std-${reg.name}`} value={reg.name} sx={{ pl: 3 }}>
+                        📄 {reg.name}
+                      </MenuItem>
+                    ))
+                  ]}
                 </Select>
               </FormControl>
 
+              {/* STEP 2: Variant Dropdown (Only appears if folder is selected) */}
+              {isGroupSelected && (
+                <FormControl fullWidth size="small">
+                  <InputLabel>Specific Dose / Duration</InputLabel>
+                  <Select
+                    label="Specific Dose / Duration"
+                    value={selectedVariant}
+                    onChange={(e) => setSelectedVariant(e.target.value)}
+                  >
+                    {availableVariants.map((reg) => (
+                      <MenuItem key={reg.name} value={reg.name}>
+                        {reg.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+
               {regimen && (
-                <Box sx={{ mt: 1, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <Box sx={{ mt: 1.5, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mb: therapyCount > 0 ? 1 : 0 }}>
                     <Chip
                       label={regimen.on_study ? "On Study" : "Off Protocol"}
