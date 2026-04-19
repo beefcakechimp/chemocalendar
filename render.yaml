@@ -22,4 +22,4 @@ projects:
       rootDir: backend
       previews:
         generation: automatic
-        pullRequestBranch: test
+    
