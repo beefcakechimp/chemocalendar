@@ -7,12 +7,18 @@ export type Chemo = {
   total_doses?: number | null;
 };
 
+export type RegimenVariant = {
+  label: string;
+  therapies: Chemo[];
+};
+
 export type Regimen = {
   name: string;
   disease_state?: string | null;
   on_study: boolean;
   notes?: string | null;
   therapies: Chemo[];
+  variants: RegimenVariant[];
 };
 
 export type CalendarCell = {
@@ -32,6 +38,7 @@ export type CalendarPreviewResponse = {
 
 export type CalendarPreviewRequest = {
   regimen_name: string;
+  variant_label?: string | null;
   title_override?: string | null;
   start_date: string; // YYYY-MM-DD
   cycle_len: number;

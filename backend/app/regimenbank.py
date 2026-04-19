@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------- config ----------------
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_DB = Path(__file__).resolve().parent / "regimenbank.db"
 ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
@@ -37,7 +37,7 @@ class Chemotherapy:
     dose: str
     frequency: str  # FREE TEXT
     duration: str   # DAY MAP
-    total_doses: Optional[int] = None  # NEW
+    total_doses: Optional[int] = None
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Chemotherapy":
@@ -47,17 +47,25 @@ class Chemotherapy:
             d["dose"],
             d["frequency"],
             d["duration"],
-            d.get("total_doses"),  # NEW
+            d.get("total_doses"),
         )
+
+
+@dataclass
+class RegimenVariant:
+    """A named dose/schedule variant of a regimen (e.g. '400 mg venetoclax')."""
+    label: str
+    therapies: List[Chemotherapy] = field(default_factory=list)
 
 
 @dataclass
 class Regimen:
     name: str
     disease_state: Optional[str] = None
-    on_study: bool = False          # NEW: off protocol by default
-    notes: Optional[str] = None     # stored; shown only on selection screen
+    on_study: bool = False
+    notes: Optional[str] = None
     therapies: List[Chemotherapy] = field(default_factory=list)
+    variants: List[RegimenVariant] = field(default_factory=list)  # NEW
 
     @staticmethod
     def from_dict(name: str, d: Dict[str, Any]) -> "Regimen":
@@ -67,6 +75,13 @@ class Regimen:
             on_study=d.get("on_study", False),
             notes=d.get("notes"),
             therapies=[Chemotherapy.from_dict(x) for x in d.get("therapies", [])],
+            variants=[
+                RegimenVariant(
+                    label=v["label"],
+                    therapies=[Chemotherapy.from_dict(t) for t in v.get("therapies", [])],
+                )
+                for v in d.get("variants", [])
+            ],
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -75,6 +90,10 @@ class Regimen:
             "on_study": self.on_study,
             "notes": self.notes,
             "therapies": [asdict(t) for t in self.therapies],
+            "variants": [
+                {"label": v.label, "therapies": [asdict(t) for t in v.therapies]}
+                for v in self.variants
+            ],
         }
 
     def upsert_chemo(self, c: Chemotherapy) -> None:
@@ -85,6 +104,13 @@ class Regimen:
                 return
         self.therapies.append(c)
 
+    def resolve_therapies(self, variant_label: Optional[str] = None) -> List[Chemotherapy]:
+        """Return the active therapy list: variant if specified, else base."""
+        if variant_label:
+            for v in self.variants:
+                if v.label == variant_label:
+                    return v.therapies
+        return self.therapies
 
 
 # ---------------- storage (SQLite) ----------------
@@ -93,69 +119,121 @@ class RegimenBank:
     SQLite-backed regimen store.
 
     Tables:
-      regimens(id, name, disease_state, notes, updated_at)
-      therapies(
-          id, regimen_id, name, route, dose,
-          frequency, duration, total_doses
-      )
+      regimens(id, name, disease_state, notes, on_study, updated_at)
+      regimen_variants(id, regimen_id, label, sort_order)
+      therapies(id, regimen_id, variant_id, name, route, dose,
+                frequency, duration, total_doses)
     """
 
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        # enforce FK constraints
         self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.execute("PRAGMA busy_timeout = 5000")  # 5s retry on lock
+        self.conn.execute("PRAGMA busy_timeout = 5000")
         self._init_schema()
 
     def _init_schema(self) -> None:
         cur = self.conn.cursor()
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS regimens (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 name          TEXT NOT NULL UNIQUE,
                 disease_state TEXT,
-                on_study      INTEGER NOT NULL DEFAULT 0,  -- 0 = off protocol, 1 = on study
+                on_study      INTEGER NOT NULL DEFAULT 0,
                 notes         TEXT,
                 updated_at    TEXT NOT NULL
             )
         """
         )
+
+        # NEW: variants table
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS regimen_variants (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                regimen_id INTEGER NOT NULL
+                               REFERENCES regimens(id) ON DELETE CASCADE,
+                label      TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """
+        )
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS therapies (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 regimen_id  INTEGER NOT NULL,
+                variant_id  INTEGER,
                 name        TEXT NOT NULL,
                 route       TEXT NOT NULL,
                 dose        TEXT NOT NULL,
                 frequency   TEXT NOT NULL,
                 duration    TEXT NOT NULL,
                 total_doses INTEGER,
-                FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE
+                FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE,
+                FOREIGN KEY (variant_id) REFERENCES regimen_variants(id) ON DELETE CASCADE
             )
         """
         )
 
-        # --- lightweight migration: ensure on_study exists on regimens ---
+        # --- migrations: ensure columns exist on older DBs ---
         cur.execute("PRAGMA table_info(regimens)")
         rcols = [row["name"] for row in cur.fetchall()]
         if "on_study" not in rcols:
             cur.execute(
-                "ALTER TABLE regimens "
-                "ADD COLUMN on_study INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE regimens ADD COLUMN on_study INTEGER NOT NULL DEFAULT 0"
             )
 
-        # --- lightweight migration: ensure total_doses exists on therapies ---
         cur.execute("PRAGMA table_info(therapies)")
         cols = [row["name"] for row in cur.fetchall()]
         if "total_doses" not in cols:
             cur.execute("ALTER TABLE therapies ADD COLUMN total_doses INTEGER")
+        if "variant_id" not in cols:
+            cur.execute(
+                "ALTER TABLE therapies ADD COLUMN variant_id INTEGER "
+                "REFERENCES regimen_variants(id) ON DELETE CASCADE"
+            )
 
         self.conn.commit()
 
+    # ----- helpers -----
+    def _fetch_therapies_for_base(self, reg_id: int) -> List[Chemotherapy]:
+        cur = self.conn.execute(
+            "SELECT name, route, dose, frequency, duration, total_doses "
+            "FROM therapies WHERE regimen_id = ? AND variant_id IS NULL ORDER BY id",
+            (reg_id,),
+        )
+        return [
+            Chemotherapy(r["name"], r["route"], r["dose"], r["frequency"], r["duration"], r["total_doses"])
+            for r in cur.fetchall()
+        ]
+
+    def _fetch_therapies_for_variant(self, variant_id: int) -> List[Chemotherapy]:
+        cur = self.conn.execute(
+            "SELECT name, route, dose, frequency, duration, total_doses "
+            "FROM therapies WHERE variant_id = ? ORDER BY id",
+            (variant_id,),
+        )
+        return [
+            Chemotherapy(r["name"], r["route"], r["dose"], r["frequency"], r["duration"], r["total_doses"])
+            for r in cur.fetchall()
+        ]
+
+    def _insert_therapies(self, reg_id: int, therapies: List[Chemotherapy], variant_id: Optional[int] = None) -> None:
+        for t in therapies:
+            total_doses = (
+                t.total_doses if t.total_doses is not None else len(parse_day_spec(t.duration))
+            )
+            self.conn.execute(
+                "INSERT INTO therapies("
+                "regimen_id, variant_id, name, route, dose, frequency, duration, total_doses"
+                ") VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                (reg_id, variant_id, t.name, t.route, t.dose, t.frequency, t.duration, total_doses),
+            )
 
     # ----- public API -----
     def list_regimens(self) -> List[str]:
@@ -176,21 +254,19 @@ class RegimenBank:
             return None
 
         reg_id = row["id"]
-        cur_t = self.conn.execute(
-            "SELECT name, route, dose, frequency, duration, total_doses "
-            "FROM therapies WHERE regimen_id = ? ORDER BY id",
+        base_therapies = self._fetch_therapies_for_base(reg_id)
+
+        variant_rows = self.conn.execute(
+            "SELECT id, label FROM regimen_variants WHERE regimen_id = ? ORDER BY sort_order, id",
             (reg_id,),
-        )
-        therapies = [
-            Chemotherapy(
-                trow["name"],
-                trow["route"],
-                trow["dose"],
-                trow["frequency"],
-                trow["duration"],
-                trow["total_doses"],
+        ).fetchall()
+
+        variants = [
+            RegimenVariant(
+                label=vr["label"],
+                therapies=self._fetch_therapies_for_variant(vr["id"]),
             )
-            for trow in cur_t.fetchall()
+            for vr in variant_rows
         ]
 
         return Regimen(
@@ -198,19 +274,15 @@ class RegimenBank:
             disease_state=row["disease_state"],
             on_study=bool(row["on_study"]),
             notes=row["notes"],
-            therapies=therapies,
+            therapies=base_therapies,
+            variants=variants,
         )
 
     def upsert_regimen(self, reg: Regimen) -> None:
-        """
-        Insert or update a regimen and fully replace its therapies.
-        """
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self.conn:
-            # check if regimen exists
             cur = self.conn.execute(
-                "SELECT id FROM regimens WHERE name = ?",
-                (reg.name,),
+                "SELECT id FROM regimens WHERE name = ?", (reg.name,)
             )
             row = cur.fetchone()
             if row:
@@ -221,11 +293,9 @@ class RegimenBank:
                     "WHERE id = ?",
                     (reg.disease_state, reg.notes, int(reg.on_study), now, reg_id),
                 )
-                # replace therapies
-                self.conn.execute(
-                    "DELETE FROM therapies WHERE regimen_id = ?",
-                    (reg_id,),
-                )
+                # Delete all therapies and variants; re-insert fresh
+                self.conn.execute("DELETE FROM therapies WHERE regimen_id = ?", (reg_id,))
+                self.conn.execute("DELETE FROM regimen_variants WHERE regimen_id = ?", (reg_id,))
             else:
                 self.conn.execute(
                     "INSERT INTO regimens(name, disease_state, notes, on_study, updated_at) "
@@ -233,38 +303,27 @@ class RegimenBank:
                     (reg.name, reg.disease_state, reg.notes, int(reg.on_study), now),
                 )
                 reg_id = self.conn.execute(
-                    "SELECT id FROM regimens WHERE name = ?",
-                    (reg.name,),
+                    "SELECT id FROM regimens WHERE name = ?", (reg.name,)
                 ).fetchone()["id"]
 
-            # insert therapies (unchanged from your version)
-            for t in reg.therapies:
-                total_doses = (
-                    t.total_doses
-                    if t.total_doses is not None
-                    else len(parse_day_spec(t.duration))
-                )
-                self.conn.execute(
-                    "INSERT INTO therapies("
-                    "regimen_id, name, route, dose, frequency, duration, total_doses"
-                    ") VALUES(?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        reg_id,
-                        t.name,
-                        t.route,
-                        t.dose,
-                        t.frequency,
-                        t.duration,
-                        total_doses,
-                    ),
-                )
+            # Base therapies (variant_id = NULL)
+            self._insert_therapies(reg_id, reg.therapies, variant_id=None)
 
+            # Variants
+            for sort_order, v in enumerate(reg.variants):
+                self.conn.execute(
+                    "INSERT INTO regimen_variants(regimen_id, label, sort_order) VALUES(?, ?, ?)",
+                    (reg_id, v.label, sort_order),
+                )
+                variant_id = self.conn.execute(
+                    "SELECT last_insert_rowid()"
+                ).fetchone()[0]
+                self._insert_therapies(reg_id, v.therapies, variant_id=variant_id)
 
     def delete_regimen(self, name: str) -> bool:
         with self.conn:
             cur = self.conn.execute(
-                "DELETE FROM regimens WHERE name = ?",
-                (name.strip(),),
+                "DELETE FROM regimens WHERE name = ?", (name.strip(),)
             )
             return cur.rowcount > 0
 
@@ -345,7 +404,6 @@ def _edit_agent(base: Chemotherapy) -> Chemotherapy:
         base.duration,
     )
 
-    # Show existing total_doses if present
     td_default = "" if base.total_doses is None else str(base.total_doses)
     td_raw = input(
         f"Total doses (optional; leave blank to auto-calc from days)"
@@ -353,7 +411,6 @@ def _edit_agent(base: Chemotherapy) -> Chemotherapy:
     ).strip()
 
     if not td_raw and td_default:
-        # keep previous value
         try:
             td_val: Optional[int] = int(td_default)
         except ValueError:
@@ -386,7 +443,8 @@ def _select_regimen_with_notes(
     for i, n in enumerate(names, 1):
         reg = bank.get_regimen(n)
         note = f"  {_italic('— ' + reg.notes)}" if reg and reg.notes else ""
-        print(f"  {i}. {n}{note}")
+        variant_hint = f"  {_italic(f'[{len(reg.variants)} variants]')}" if reg and reg.variants else ""
+        print(f"  {i}. {n}{note}{variant_hint}")
         index_map[str(i)] = n
     if allow_new:
         print("  n. <Add new>")
@@ -418,8 +476,6 @@ def parse_day_spec(day_spec: str) -> List[int]:
         return []
 
     s = day_spec.replace("–", "-").strip().lower()
-
-    # Strip leading 'day' / 'days' and optional punctuation
     s = re.sub(r"^days?\s*[:\-]?\s*", "", s)
 
     if not s:
@@ -438,7 +494,6 @@ def parse_day_spec(day_spec: str) -> List[int]:
                 if a <= b:
                     out.extend(range(a, b + 1))
             except ValueError:
-                # Skip malformed segments instead of killing everything
                 continue
         else:
             try:
@@ -460,10 +515,8 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
             for d in dlist:
                 by_day.setdefault(d, []).append(t.name)
 
-    # first Sunday before/at start
     first_sun = start - dt.timedelta(days=(start.weekday() + 1) % 7)
     last_needed = start + dt.timedelta(days=max_day - 1)
-    # last Saturday on/after last_needed  (weekday: Mon=0..Sun=6, Sat=5)
     last_sat = last_needed + dt.timedelta(days=(5 - last_needed.weekday()) % 7)
 
     grid: List[List[Dict[str, Any]]] = []
@@ -540,7 +593,7 @@ def _spell_route(route: str) -> str:
         "SQ": "Inject SubQ",
         "IT": "Given during lumbar puncture",
     }
-    return mapping.get(r, route)  # fall back to raw text if unknown
+    return mapping.get(r, route)
 
 
 def export_calendar_docx(
@@ -572,28 +625,21 @@ def export_calendar_docx(
     )
 
     doc = Document()
-    # Set default document font to Calibri
     style = doc.styles['Normal']
     style.font.name = 'Calibri'
     style._element.rPr.rFonts.set(qn('w:ascii'), 'Calibri')
     style._element.rPr.rFonts.set(qn('w:hAnsi'), 'Calibri')
-    style.font.size = Pt(12) 
-     # Single spacing, no extra space before/after for Normal style
+    style.font.size = Pt(12)
     pf = style.paragraph_format
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
     pf.line_spacing_rule = WD_LINE_SPACING.SINGLE
 
     sec = doc.sections[0]
-
-    # Page layout: landscape, 0.5" margins
     sec.orientation = 1
     sec.page_width, sec.page_height = Inches(11), Inches(8.5)
-    sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(
-        0.5
-    )
+    sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    # ---------- HEADER: Name/DOB left, logo right ----------
     hdr = sec.header
     try:
         htbl = hdr.add_table(rows=1, cols=2, width=sec.page_width)
@@ -601,7 +647,6 @@ def export_calendar_docx(
         htbl = hdr.add_table(rows=1, cols=2)
     htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-    # Left cell: name + DOB, italic, small
     left_cell = htbl.cell(0, 0)
     left_cell.text = ""
 
@@ -621,14 +666,12 @@ def export_calendar_docx(
     r_dob.italic = True
     r_dob.font.size = Pt(12)
 
-    # remove any default empty paragraph if present
     if left_cell.paragraphs and left_cell.paragraphs[0].text == "":
         try:
             left_cell._element.remove(left_cell.paragraphs[0]._element)
         except Exception:
             pass
 
-    # Right cell: UCM logo aligned right (if present)
     right_cell = htbl.cell(0, 1)
     right_p = right_cell.paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -641,14 +684,12 @@ def export_calendar_docx(
         except Exception as e:
             print(f"[WARN] Could not insert logo: {e}")
 
-    # ---------- CALENDAR TABLE ----------
-    rows = len(grid) + 2  # row 0 = title; row 1 = weekday header
+    rows = len(grid) + 2
     cols = 7
     table = doc.add_table(rows=rows, cols=cols)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = True
 
-    # ----- Row 0: merged title row -----
     title_row = table.rows[0]
     title_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
     title_row.height = Inches(0.72)
@@ -659,7 +700,6 @@ def export_calendar_docx(
     c = first_cell
     c.text = ""
 
-    # Line 1: "Chemotherapy Calendar"
     p1 = c.paragraphs[0]
     p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p1.paragraph_format.space_before = Pt(0)
@@ -668,7 +708,6 @@ def export_calendar_docx(
     r1.bold = True
     r1.font.size = Pt(14)
 
-    # Line 2: regimen name - Cycle X   (cycle bold)
     p2 = c.add_paragraph()
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p2.paragraph_format.space_before = Pt(0)
@@ -681,7 +720,6 @@ def export_calendar_docx(
     r2b.bold = True
     r2b.font.size = Pt(14)
 
-    # Line 3: month/year range
     p3 = c.add_paragraph()
     p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p3.paragraph_format.space_before = Pt(0)
@@ -689,7 +727,6 @@ def export_calendar_docx(
     r3 = p3.add_run(f"{months} {year}")
     r3.font.size = Pt(14)
 
-    # Optional note line
     if note:
         p4 = c.add_paragraph()
         p4.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -699,16 +736,7 @@ def export_calendar_docx(
         r4.italic = True
         r4.font.size = Pt(11)
 
-    # ----- Row 1: weekday header row (black with white text) -----
-    header_names = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-    ]
+    header_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     header_row = table.rows[1]
     header_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
     header_row.height = Inches(0.10)
@@ -725,7 +753,6 @@ def export_calendar_docx(
         r.font.size = Pt(14)
         r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
-        # black shading
         tcPr = cell._tc.get_or_add_tcPr()
         shd = OxmlElement("w:shd")
         shd.set(qn("w:val"), "clear")
@@ -733,7 +760,6 @@ def export_calendar_docx(
         shd.set(qn("w:fill"), "000000")
         tcPr.append(shd)
 
-    # ----- Rows 2+: calendar weeks -----
     for wi, week in enumerate(grid):
         row = table.rows[wi + 2]
         row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
@@ -743,7 +769,6 @@ def export_calendar_docx(
             cell = row.cells[di]
             cell.text = ""
 
-            # Date – right aligned
             p_date = cell.paragraphs[0]
             p_date.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p_date.paragraph_format.space_before = Pt(0)
@@ -755,7 +780,6 @@ def export_calendar_docx(
             rd.font.size = Pt(14)
 
             if cell_data["cycle_day"] is not None:
-                # "Day X" – left aligned
                 p_day = cell.add_paragraph()
                 p_day.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 p_day.paragraph_format.space_before = Pt(0)
@@ -764,7 +788,6 @@ def export_calendar_docx(
                 rday.italic = True
                 rday.font.size = Pt(14)
 
-                # Med labels – left aligned, bold when not "rest"
                 for lab in cell_data["labels"]:
                     p_lab = cell.add_paragraph()
                     p_lab.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -775,7 +798,6 @@ def export_calendar_docx(
                     if lab.lower() != "rest":
                         rl.bold = True
 
-    # ----- Table borders (thin) -----
     tbl_pr = table._element.tblPr
     borders = OxmlElement("w:tblBorders")
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
@@ -787,7 +809,6 @@ def export_calendar_docx(
         borders.append(e)
     tbl_pr.append(borders)
 
-    # ---------- Patient-friendly bullets below calendar ----------
     doc.add_paragraph()
 
     for t in reg.therapies:
@@ -817,7 +838,6 @@ def export_calendar_docx(
 
     doc.save(out_path)
     return True
-
 
 
 # ---------------- catalog + editors ----------------
@@ -870,10 +890,6 @@ def choose_agent_from_catalog(cat: Dict[str, List[Chemotherapy]]) -> Optional[Ch
 
 # ---------------- unified save-or-save-as ----------------
 def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
-    """
-    Offer: 1) Save As (new name), 2) Save (same name), 3) Don't save.
-    Overwrites only happen if the user explicitly types 'yes'.
-    """
     exists = bank.get_regimen(reg.name) is not None
 
     print("\nPersist changes:")
@@ -882,7 +898,6 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
     else:
         print(f"  Current name '{reg.name}' does not yet exist in regimen bank.")
 
-    # Keep the safe option first
     print("  1. Save As")
     if exists:
         print(f"  2. Save (OVERWRITE existing '{reg.name}')")
@@ -893,7 +908,6 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
     while True:
         sel = input("Select [1-3]: ").strip()
         if sel == "1":
-            # Always ask for a name for Save As
             while True:
                 new_name = input("New regimen name: ").strip()
                 if not new_name:
@@ -918,7 +932,7 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
             if exists:
                 print(f"WARNING: This will overwrite existing regimen '{reg.name}'.")
                 confirm = input(
-                    "Type '' to overwrite, or anything else to cancel: "
+                    "Type 'y' to overwrite, or anything else to cancel: "
                 ).strip().lower()
                 if confirm != "y":
                     print("Overwrite cancelled.")
@@ -937,9 +951,6 @@ def _persist_menu(bank: RegimenBank, reg: Regimen) -> None:
 
 # ---------------- wizard ----------------
 def _ask_on_study(current: bool) -> bool:
-    """
-    Prompt user to classify regimen as off protocol vs on-study.
-    """
     print("\nresearch protocol (IRB/CIRB)?")
     print("  1. Off protocol")
     print("  2. IRB or CIRB")
@@ -953,6 +964,7 @@ def _ask_on_study(current: bool) -> bool:
         if s == "2":
             return True
         print("Choose 1 or 2.")
+
 
 def wizard(bank: RegimenBank) -> None:
     rname, is_new = _select_regimen_with_notes(
@@ -968,17 +980,13 @@ def wizard(bank: RegimenBank) -> None:
         reg = reg or Regimen(name=rname)
     else:
         print(f"\nEditing regimen '{rname}'.")
-        print(
-            "Hint: Use 'Persist → Save As' if you want to create a new regimen (e.g., 7+3 → 7+3+ven)."
-        )
 
     reg.disease_state = _opt("Disease state", reg.disease_state)
     reg.notes = _opt("Regimen notes (selection aid only)", reg.notes)
-    # NEW: on-study vs off-protocol
     reg.on_study = _ask_on_study(reg.on_study)
 
     while True:
-        print("\nTherapies:")
+        print("\nTherapies (base):")
         if not reg.therapies:
             print("  (none)")
         else:
@@ -986,9 +994,14 @@ def wizard(bank: RegimenBank) -> None:
                 print(
                     f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}"
                 )
+
+        print(f"\nVariants: {len(reg.variants)}")
+        for vi, v in enumerate(reg.variants, 1):
+            print(f"  V{vi}. [{v.label}] — {len(v.therapies)} agent(s)")
+
         print(
-            "\nActions: 1) Add new  2) Add from existing library  3) Edit  "
-            "4) Remove agent  5) Rename regimen  6) Persist (Save / Save As)  7) Finish"
+            "\nActions: 1) Add base agent  2) Edit base agent  3) Remove base agent  "
+            "4) Manage variants  5) Rename  6) Persist  7) Finish"
         )
         ch = input("Select [1-7]: ").strip()
 
@@ -997,11 +1010,6 @@ def wizard(bank: RegimenBank) -> None:
             reg.therapies[-1] = _edit_agent(reg.therapies[-1])
 
         elif ch == "2":
-            tmpl = choose_agent_from_catalog(build_agent_catalog(bank))
-            if tmpl:
-                reg.upsert_chemo(_edit_agent(tmpl))
-
-        elif ch == "3":
             if not reg.therapies:
                 print("No agents.")
                 continue
@@ -1011,7 +1019,7 @@ def wizard(bank: RegimenBank) -> None:
             else:
                 print("Invalid.")
 
-        elif ch == "4":
+        elif ch == "3":
             if not reg.therapies:
                 print("No agents.")
                 continue
@@ -1022,8 +1030,10 @@ def wizard(bank: RegimenBank) -> None:
             else:
                 print("Invalid.")
 
+        elif ch == "4":
+            _manage_variants(reg)
+
         elif ch == "5":
-            # Rename regimen
             print(f"Current regimen name: {reg.name}")
             new_name = input("New regimen name (leave blank to cancel): ").strip()
             if new_name:
@@ -1045,15 +1055,99 @@ def wizard(bank: RegimenBank) -> None:
             print("Choose 1–7.")
 
 
-# ---------------- prep editor (no notes UI; save/save-as) ----------------
+def _manage_variants(reg: Regimen) -> None:
+    while True:
+        print(f"\n=== Variants for '{reg.name}' ===")
+        if not reg.variants:
+            print("  (no variants)")
+        else:
+            for i, v in enumerate(reg.variants, 1):
+                print(f"  {i}. [{v.label}] — {len(v.therapies)} agent(s)")
+                for t in v.therapies:
+                    print(f"       {t.name} | {t.route} | {t.dose} | {t.duration}")
+
+        print("\n  a) Add variant  e) Edit variant  d) Delete variant  q) Back")
+        ch = input("Select: ").strip().lower()
+
+        if ch == "a":
+            label = input("Variant label (e.g. '400 mg venetoclax'): ").strip()
+            if not label:
+                print("Label required.")
+                continue
+            v = RegimenVariant(label=label)
+            print("Add agents to this variant:")
+            while True:
+                t = Chemotherapy("", "", "", "", "")
+                t = _edit_agent(t)
+                v.therapies.append(t)
+                if input("Add another agent? [y/N]: ").strip().lower() != "y":
+                    break
+            reg.variants.append(v)
+            print(f"Variant '{label}' added.")
+
+        elif ch == "e":
+            if not reg.variants:
+                print("No variants.")
+                continue
+            k = input("Variant #: ").strip()
+            if not (k.isdigit() and 1 <= int(k) <= len(reg.variants)):
+                print("Invalid.")
+                continue
+            v = reg.variants[int(k) - 1]
+            new_label = input(f"Label [{v.label}]: ").strip()
+            if new_label:
+                v.label = new_label
+            print(f"Agents in '{v.label}':")
+            for i, t in enumerate(v.therapies, 1):
+                print(f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
+            print("  a) Add  e) Edit  d) Delete  q) Done")
+            while True:
+                ac = input("Action: ").strip().lower()
+                if ac == "q":
+                    break
+                elif ac == "a":
+                    t = _edit_agent(Chemotherapy("", "", "", "", ""))
+                    v.therapies.append(t)
+                elif ac == "e":
+                    ki = input("Agent #: ").strip()
+                    if ki.isdigit() and 1 <= int(ki) <= len(v.therapies):
+                        v.therapies[int(ki) - 1] = _edit_agent(v.therapies[int(ki) - 1])
+                elif ac == "d":
+                    ki = input("Agent # to remove: ").strip()
+                    if ki.isdigit() and 1 <= int(ki) <= len(v.therapies):
+                        gone = v.therapies.pop(int(ki) - 1)
+                        print(f"Removed {gone.name}.")
+
+        elif ch == "d":
+            if not reg.variants:
+                print("No variants.")
+                continue
+            k = input("Variant # to delete: ").strip()
+            if k.isdigit() and 1 <= int(k) <= len(reg.variants):
+                gone = reg.variants.pop(int(k) - 1)
+                print(f"Deleted variant '{gone.label}'.")
+            else:
+                print("Invalid.")
+
+        elif ch == "q":
+            return
+
+        else:
+            print("Invalid.")
+
+
+# ---------------- prep editor ----------------
 def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str]]:
-    # Work on a copy so we never mutate the base regimen directly
     work = Regimen(
         name=base.name,
         disease_state=base.disease_state,
         on_study=base.on_study,
         notes=base.notes,
         therapies=[replace(t) for t in base.therapies],
+        variants=[
+            RegimenVariant(label=v.label, therapies=[replace(t) for t in v.therapies])
+            for v in base.variants
+        ],
     )
     print(f"\n=== Calendar Prep Editor for '{work.name}' ===")
     inst_note: Optional[str] = None
@@ -1069,8 +1163,7 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
                 )
 
         choice = input(
-            "\nPress Enter to continue"
-            "or type 'e' to edit: "
+            "\nPress Enter to continue or type 'e' to edit: "
         ).strip().lower()
 
         if choice == "":
@@ -1080,7 +1173,6 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
             print("Type 'e' to edit, or just press Enter to continue.")
             continue
 
-        # --- Edit sub-menu ---
         changed = False
         while True:
             print("\nEdit actions:")
@@ -1101,9 +1193,7 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
                     continue
                 k = input("Agent # to edit: ").strip()
                 if k.isdigit() and 1 <= int(k) <= len(work.therapies):
-                    work.therapies[int(k) - 1] = _edit_agent(
-                        work.therapies[int(k) - 1]
-                    )
+                    work.therapies[int(k) - 1] = _edit_agent(work.therapies[int(k) - 1])
                     changed = True
                 else:
                     print("Invalid.")
@@ -1134,11 +1224,8 @@ def prep_editor(base: Regimen, bank: RegimenBank) -> Tuple[Regimen, Optional[str
             else:
                 print("Choose 1–5.")
 
-        # After editing session, optionally persist back to regimen bank
         if changed:
-            ans = input(
-                "Save edits? (Save or Save As)? [y/N]: "
-            ).strip().lower()
+            ans = input("Save edits? (Save or Save As)? [y/N]: ").strip().lower()
             if ans == "y":
                 _persist_menu(bank, work)
         return work, inst_note
@@ -1170,7 +1257,6 @@ def calendar_flow(bank: RegimenBank) -> None:
             print("Still empty. Exiting.")
             return
 
-    # ----- Choose OFF-protocol vs ON-study -----
     print("\nRegimen type:")
     print("  1. Off protocol (default)")
     print("  2. On study (IRB/CIRB)")
@@ -1186,7 +1272,6 @@ def calendar_flow(bank: RegimenBank) -> None:
             break
         print("Choose 1 or 2.")
 
-    # Build subset according to classification in DB
     subset: List[Regimen] = []
     for n in names:
         r = bank.get_regimen(n)
@@ -1202,7 +1287,6 @@ def calendar_flow(bank: RegimenBank) -> None:
 
     subset.sort(key=lambda r: r.name.lower())
 
-    # Show list with notes and let user pick
     print("")
     if want_on_study:
         print("Select an ON-study regimen:")
@@ -1212,7 +1296,8 @@ def calendar_flow(bank: RegimenBank) -> None:
     index_map: Dict[str, Regimen] = {}
     for i, r in enumerate(subset, 1):
         note = f"  {_italic('— ' + r.notes)}" if r.notes else ""
-        print(f"  {i}. {r.name}{note}")
+        variant_hint = f"  {_italic(f'[{len(r.variants)} variants]')}" if r.variants else ""
+        print(f"  {i}. {r.name}{note}{variant_hint}")
         index_map[str(i)] = r
 
     while True:
@@ -1222,7 +1307,33 @@ def calendar_flow(bank: RegimenBank) -> None:
             break
         print("Invalid. Try again.")
 
-    reg, note = prep_editor(base, bank)
+    # Variant selection
+    active_therapies = base.therapies
+    if base.variants:
+        print(f"\nVariants available for '{base.name}':")
+        print("  0. Default (base therapies)")
+        for i, v in enumerate(base.variants, 1):
+            print(f"  {i}. {v.label}")
+        while True:
+            vs = input("Select variant [0]: ").strip()
+            if not vs or vs == "0":
+                break
+            if vs.isdigit() and 1 <= int(vs) <= len(base.variants):
+                active_therapies = base.variants[int(vs) - 1].therapies
+                break
+            print("Invalid.")
+
+    # Substitute therapies into working copy
+    work_base = Regimen(
+        name=base.name,
+        disease_state=base.disease_state,
+        on_study=base.on_study,
+        notes=base.notes,
+        therapies=active_therapies,
+        variants=[],
+    )
+
+    reg, note = prep_editor(work_base, bank)
     start = _parse_date("Cycle start date", default=dt.date.today())
 
     while True:
@@ -1286,14 +1397,20 @@ def _print_regimen(r: Regimen) -> None:
     if r.notes:
         print(f"Notes: {r.notes}")
     if not r.therapies:
-        print("Therapies: (none)")
+        print("Base Therapies: (none)")
     else:
-        print("Therapies:")
+        print("Base Therapies:")
         for i, t in enumerate(r.therapies, 1):
             print(
                 f"  {i}. {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration} "
                 f"(total_doses={t.total_doses})"
             )
+    if r.variants:
+        print(f"Variants ({len(r.variants)}):")
+        for v in r.variants:
+            print(f"  [{v.label}]")
+            for t in v.therapies:
+                print(f"    {t.name} | {t.route} | {t.dose} | {t.frequency} | {t.duration}")
     print("")
 
 

@@ -1,0 +1,25 @@
+# Exported from Render on 2026-04-19T13:30:17Z
+version: "1"
+projects:
+- name: My project
+  environments:
+  - name: Production
+    services:
+    - type: web
+      name: chemocalendar
+      runtime: docker
+      repo: https://github.com/beefcakechimp/chemocalendar
+      plan: starter
+      envVars:
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      region: ohio
+      dockerContext: .
+      dockerfilePath: ./Dockerfile
+      autoDeployTrigger: commit
+      rootDir: backend
+      previews:
+        generation: automatic
+    
