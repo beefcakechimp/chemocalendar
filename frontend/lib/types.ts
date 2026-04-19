@@ -1,11 +1,15 @@
-export interface Chemo {
+export type Chemo = {
   name: string;
   route: string;
-  frequency: string;
-  options: TherapyOption[];
   dose: string;
+  frequency: string;
   duration: string;
-  total_doses: number | null;
+  total_doses?: number | null;
+};
+
+export type RegimenVariant = {
+  label: string;
+  therapies: Chemo[];
 };
 
 export type Regimen = {
@@ -14,6 +18,7 @@ export type Regimen = {
   on_study: boolean;
   notes?: string | null;
   therapies: Chemo[];
+  variants: RegimenVariant[];
 };
 
 export type CalendarCell = {
@@ -33,16 +38,11 @@ export type CalendarPreviewResponse = {
 
 export type CalendarPreviewRequest = {
   regimen_name: string;
+  variant_label?: string | null;
   title_override?: string | null;
   start_date: string; // YYYY-MM-DD
   cycle_len: number;
   phase: "Cycle" | "Induction";
   cycle_num?: number | null;
   note?: string | null;
-};
-
-export interface TherapyOption {
-  dose: string;
-  duration: string;
-  total_doses: number | null;
 };

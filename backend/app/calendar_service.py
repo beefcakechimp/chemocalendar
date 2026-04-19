@@ -33,16 +33,21 @@ def build_preview(
     phase: str,
     cycle_num: Optional[int],
     title_override: Optional[str],
+    variant_label: Optional[str] = None,
 ) -> Tuple[str, str, Regimen, dt.date, dt.date, List[List[Dict[str, Any]]]]:
     label = _cycle_label_from_inputs(phase, cycle_num)
     cal_title = (title_override or reg.name).strip() or reg.name
+
+    # Resolve which therapy list to use
+    active_therapies = reg.resolve_therapies(variant_label)
 
     reg_for_preview = Regimen(
         name=cal_title,
         disease_state=reg.disease_state,
         on_study=reg.on_study,
         notes=reg.notes,
-        therapies=reg.therapies,
+        therapies=active_therapies,
+        variants=[],  # not needed downstream
     )
 
     first_sun, last_sat, _, grid = compute_calendar_grid(reg_for_preview, start, cycle_len)
