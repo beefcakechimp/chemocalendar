@@ -4,26 +4,12 @@ import * as React from "react";
 import useSWR from "swr";
 import dayjs from "dayjs";
 import { useSearchParams } from "next/navigation";
-// 1. Updated Import: We import listAllRegimensDetailed instead of listRegimens
-import { listAllRegimensDetailed, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
+import { listRegimens, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
 import { Regimen, CalendarPreviewResponse } from "@/lib/types";
 import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  Divider,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
+  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider,
+  FormControl, FormControlLabel, InputLabel, MenuItem, Radio, RadioGroup, Select,
+  Stack, TextField, Tooltip, Typography,
 } from "@mui/material";
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -37,28 +23,17 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <Typography
-      sx={{
-        fontSize: "0.68rem",
-        fontWeight: 700,
-        color: "#94a3b8",
-        textTransform: "uppercase",
-        letterSpacing: "0.08em",
-        mb: 1,
-        mt: 2,
-        "&:first-of-type": { mt: 0 },
-      }}
-    >
+    <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, mt: 2, "&:first-of-type": { mt: 0 } }}>
       {children}
     </Typography>
   );
 }
 
-function FieldHint({ children }: { children: React.ReactNode }) {
+export default function CalendarPage() {
   return (
-    <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8", mt: 0.5, lineHeight: 1.4 }}>
-      {children}
-    </Typography>
+    <React.Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}>
+      <CalendarPageInner />
+    </React.Suspense>
   );
 }
 
@@ -66,101 +41,49 @@ function CalendarPageInner() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
 
-  // 2. Fetch the detailed list of all regimens
-  const { data: allRegimens = [], isLoading: namesLoading } = useSWR("all-regimens-detailed", listAllRegimensDetailed);
-
-  // 3. New Two-Step Selection State
-  const [selectedParent, setSelectedParent] = React.useState<string>("");
-  const [selectedVariant, setSelectedVariant] = React.useState<string>("");
-
-  // 4. Smart Agent Grouping Algorithm
-  const structure = React.useMemo(() => {
-    const signatureMap: Record<string, Regimen[]> = {};
-    const standalones: Regimen[] = [];
-    const groups: Record<string, Regimen[]> = {};
-
-    allRegimens.forEach((reg) => {
-      if (!reg.therapies || reg.therapies.length === 0) {
-        standalones.push(reg);
-        return;
-      }
-      // Create signature based on alphabetical drug names
-      const sig = reg.therapies.map(t => t.name.trim().toLowerCase()).sort().join(" + ");
-      if (!signatureMap[sig]) signatureMap[sig] = [];
-      signatureMap[sig].push(reg);
-    });
-
-    Object.entries(signatureMap).forEach(([sig, regs]) => {
-      if (regs.length > 1) {
-        // Format signature to Title Case for folder name
-        const groupName = sig.replace(/\b\w/g, l => l.toUpperCase());
-        groups[groupName] = regs;
-      } else {
-        standalones.push(regs[0]);
-      }
-    });
-
-    return { groups, standalones };
-  }, [allRegimens]);
-
-  // Derived state to figure out what the user is actually looking at
-  const isGroupSelected = !!structure.groups[selectedParent];
-  const availableVariants = isGroupSelected ? structure.groups[selectedParent] : [];
+  const { data: names, isLoading: namesLoading } = useSWR("regimens", listRegimens);
+  const [regimenName, setRegimenName] = React.useState<string>(preselected || "");
   
-  // The final string we send to the backend for previews and exports
-  const regimenName = isGroupSelected ? selectedVariant : selectedParent;
-
   const { data: regimen } = useSWR<Regimen>(
     regimenName ? ["regimen", regimenName] : null,
     () => getRegimen(regimenName)
   );
+
+  // Editable Therapies State (Holds the *currently selected* options)
+  const [customTherapies, setCustomTherapies] = React.useState<any[]>([]);
+
+  // When regimen loads, default to the FIRST option of every array
+  React.useEffect(() => {
+    if (regimen?.therapies) {
+      setCustomTherapies(regimen.therapies.map(t => ({
+        ...t,
+        dose: t.dose.split(" | ")[0],
+        duration: t.duration.split(" | ")[0]
+      })));
+    } else {
+      setCustomTherapies([]);
+    }
+  }, [regimen]);
+
+  const updateTherapy = (index: number, field: string, value: string) => {
+    const updated = [...customTherapies];
+    updated[index] = { ...updated[index], [field]: value };
+    setCustomTherapies(updated);
+  };
 
   const [startDate, setStartDate] = React.useState<string>(dayjs().format("YYYY-MM-DD"));
   const [cycleLen, setCycleLen] = React.useState<number>(28);
   const [phase, setPhase] = React.useState<"Cycle" | "Induction">("Cycle");
   const [cycleNum, setCycleNum] = React.useState<number>(1);
   const [note, setNote] = React.useState<string>("");
-
   const [title, setTitle] = React.useState<string>("");
   const [titleDirty, setTitleDirty] = React.useState(false);
 
-  // 5. Intelligent Pre-selection (handles Dashboard clicks and default loading)
   React.useEffect(() => {
-    if (!selectedParent && allRegimens.length > 0) {
-      if (preselected) {
-        let foundGroup = "";
-        Object.entries(structure.groups).forEach(([gName, regs]) => {
-          if (regs.some(r => r.name === preselected)) foundGroup = gName;
-        });
-
-        if (foundGroup) {
-          setSelectedParent(foundGroup);
-          setSelectedVariant(preselected);
-        } else {
-          setSelectedParent(preselected);
-        }
-      } else {
-        if (structure.standalones.length > 0) {
-          setSelectedParent(structure.standalones[0].name);
-        } else if (Object.keys(structure.groups).length > 0) {
-          const firstGroup = Object.keys(structure.groups)[0];
-          setSelectedParent(firstGroup);
-          setSelectedVariant(structure.groups[firstGroup][0].name);
-        }
-      }
+    if (!regimenName && names && names.length) {
+      setRegimenName(preselected && names.includes(preselected) ? preselected : names[0]);
     }
-  }, [allRegimens, preselected, selectedParent, structure]);
-
-  const handleParentChange = (e: any) => {
-    const value = e.target.value;
-    setSelectedParent(value);
-    // Auto-select the first specific dose if they click a folder
-    if (structure.groups[value]) {
-      setSelectedVariant(structure.groups[value][0].name); 
-    } else {
-      setSelectedVariant("");
-    }
-  };
+  }, [names, regimenName, preselected]);
 
   React.useEffect(() => { setTitleDirty(false); }, [regimenName]);
   React.useEffect(() => {
@@ -180,6 +103,7 @@ function CalendarPageInner() {
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
     note: note.trim() || null,
+    therapies_override: customTherapies.length > 0 ? customTherapies : undefined
   });
 
   async function runPreview() {
@@ -187,7 +111,7 @@ function CalendarPageInner() {
     setErr("");
     setBusy(true);
     try {
-      const resp = await previewCalendar(buildRequest());
+      const resp = await previewCalendar(buildRequest() as any);
       setPreview(resp);
     } catch (e: any) {
       setErr(e?.message || "Preview failed");
@@ -202,7 +126,7 @@ function CalendarPageInner() {
     setErr("");
     setExportBusy(true);
     try {
-      const { blob, filename } = await exportCalendarDocx(buildRequest());
+      const { blob, filename } = await exportCalendarDocx(buildRequest() as any);
       downloadBlob(blob, filename);
     } catch (e: any) {
       setErr(e?.message || "Export failed");
@@ -216,108 +140,38 @@ function CalendarPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regimenName]);
 
-  const therapyCount = regimen?.therapies?.length ?? 0;
+  const therapyCount = customTherapies.length;
 
   return (
     <Box>
       <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: 700, color: "#0f172a", mb: 0.5 }}>
-          Calendar Generator
-        </Typography>
-        <Typography sx={{ color: "#64748b", fontSize: "0.9rem" }}>
-          Configure a treatment cycle and preview or export the calendar
-        </Typography>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: "#0f172a", mb: 0.5 }}>Calendar Generator</Typography>
+        <Typography sx={{ color: "#64748b", fontSize: "0.9rem" }}>Configure a treatment cycle and preview or export the calendar</Typography>
       </Box>
 
-      {err && (
-        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErr("")}>
-          {err}
-        </Alert>
-      )}
+      {err && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErr("")}>{err}</Alert>}
 
       <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="flex-start">
-        <Box sx={{ width: { xs: "100%", lg: 300 }, flexShrink: 0 }}>
+        <Box sx={{ width: { xs: "100%", lg: 320 }, flexShrink: 0 }}>
           <Card variant="outlined">
             <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
 
-              <SectionLabel>Regimen</SectionLabel>
-              
-              {/* STEP 1: Main Dropdown */}
-              <FormControl fullWidth size="small" sx={{ mb: isGroupSelected ? 1.5 : 0 }}>
-                <InputLabel>Select regimen or group</InputLabel>
-                <Select
-                  label="Select regimen or group"
-                  value={selectedParent}
-                  onChange={handleParentChange}
-                  disabled={namesLoading}
-                >
-                  {Object.keys(structure.groups).length > 0 && [
-                    <MenuItem key="header-groups" disabled sx={{ fontWeight: 700, color: '#0f4c81', opacity: 1 }}>
-                      DRUG COMBINATIONS (Select to pick dose)
-                    </MenuItem>,
-                    ...Object.keys(structure.groups).map((g) => (
-                      <MenuItem key={`group-${g}`} value={g} sx={{ pl: 3 }}>
-                        📁 {g}
-                      </MenuItem>
-                    ))
-                  ]}
-
-                  {structure.standalones.length > 0 && [
-                    <MenuItem key="header-standalones" disabled sx={{ fontWeight: 700, color: '#0f4c81', opacity: 1, mt: 1 }}>
-                      STANDALONE REGIMENS
-                    </MenuItem>,
-                    ...structure.standalones.map((reg) => (
-                      <MenuItem key={`std-${reg.name}`} value={reg.name} sx={{ pl: 3 }}>
-                        📄 {reg.name}
-                      </MenuItem>
-                    ))
-                  ]}
+              <SectionLabel>1. Base Regimen</SectionLabel>
+              <FormControl fullWidth size="small">
+                <Select value={regimenName} onChange={(e) => setRegimenName(e.target.value)} disabled={namesLoading}>
+                  {(names || []).map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                 </Select>
               </FormControl>
-
-              {/* STEP 2: Variant Dropdown (Only appears if folder is selected) */}
-              {isGroupSelected && (
-                <FormControl fullWidth size="small">
-                  <InputLabel>Specific Dose / Duration</InputLabel>
-                  <Select
-                    label="Specific Dose / Duration"
-                    value={selectedVariant}
-                    onChange={(e) => setSelectedVariant(e.target.value)}
-                  >
-                    {availableVariants.map((reg) => (
-                      <MenuItem key={reg.name} value={reg.name}>
-                        {reg.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
 
               {regimen && (
                 <Box sx={{ mt: 1.5, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mb: therapyCount > 0 ? 1 : 0 }}>
-                    <Chip
-                      label={regimen.on_study ? "On Study" : "Off Protocol"}
-                      size="small"
-                      sx={{
-                        height: 20,
-                        fontSize: "0.68rem",
-                        fontWeight: 600,
-                        background: regimen.on_study ? "#dbeafe" : "#f0fdf4",
-                        color: regimen.on_study ? "#1d4ed8" : "#15803d",
-                      }}
-                    />
-                    {regimen.disease_state && (
-                      <Chip
-                        label={regimen.disease_state}
-                        size="small"
-                        sx={{ height: 20, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }}
-                      />
-                    )}
+                    <Chip label={regimen.on_study ? "On Study" : "Off Protocol"} size="small" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 600, background: regimen.on_study ? "#dbeafe" : "#f0fdf4", color: regimen.on_study ? "#1d4ed8" : "#15803d" }} />
+                    {regimen.disease_state && <Chip label={regimen.disease_state} size="small" sx={{ height: 20, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }} />}
                   </Stack>
                   {therapyCount > 0 && (
                     <Box>
-                      {regimen.therapies.map((t, i) => (
+                      {customTherapies.map((t, i) => (
                         <Box key={i} sx={{ display: "flex", alignItems: "baseline", gap: 0.75, mt: 0.5 }}>
                           <Box component="span" sx={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "#0f4c81", flexShrink: 0, mt: 0.5 }} />
                           <Typography sx={{ fontSize: "0.75rem", color: "#334155", lineHeight: 1.4 }}>
@@ -332,26 +186,63 @@ function CalendarPageInner() {
 
               <Divider sx={{ my: 2 }} />
 
-              <SectionLabel>Schedule</SectionLabel>
+              <SectionLabel>2. Customize Dose & Days</SectionLabel>
+              {customTherapies.length === 0 && (
+                <Typography sx={{ fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                  No therapies found for this regimen.
+                </Typography>
+              )}
+              {customTherapies.map((t, idx) => {
+                const orig = regimen?.therapies[idx];
+                const doseOptions = orig?.dose ? orig.dose.split(" | ") : [t.dose];
+                const durationOptions = orig?.duration ? orig.duration.split(" | ") : [t.duration];
 
-              <TextField
-                fullWidth size="small" label="Document title" value={title}
-                onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }}
-                sx={{ mb: 1.25 }}
-              />
+                return (
+                  <Box key={idx} sx={{ mb: 1.5, p: 1.5, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <Typography sx={{ fontWeight: 600, fontSize: "0.85rem", color: "#0f172a", mb: 1.5 }}>
+                      {t.name} <Typography component="span" sx={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 400 }}>({t.route})</Typography>
+                    </Typography>
+
+                    <Stack spacing={2}>
+                      {doseOptions.length > 1 ? (
+                        <Box>
+                          <Typography sx={{ fontSize: "0.72rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", mb: 0.5 }}>Dose</Typography>
+                          <RadioGroup row value={t.dose} onChange={(e) => updateTherapy(idx, 'dose', e.target.value)}>
+                            {doseOptions.map(opt => (
+                              <FormControlLabel key={opt} value={opt} control={<Radio size="small" sx={{ py: 0.5 }} />} label={<Typography sx={{fontSize: "0.85rem"}}>{opt}</Typography>} />
+                            ))}
+                          </RadioGroup>
+                        </Box>
+                      ) : (
+                        <TextField fullWidth size="small" label="Dose" value={t.dose} onChange={(e) => updateTherapy(idx, 'dose', e.target.value)} />
+                      )}
+
+                      {durationOptions.length > 1 ? (
+                        <Box>
+                          <Typography sx={{ fontSize: "0.72rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", mb: 0.5 }}>Days</Typography>
+                          <RadioGroup row value={t.duration} onChange={(e) => updateTherapy(idx, 'duration', e.target.value)}>
+                            {durationOptions.map(opt => (
+                              <FormControlLabel key={opt} value={opt} control={<Radio size="small" sx={{ py: 0.5 }} />} label={<Typography sx={{fontSize: "0.85rem"}}>{opt}</Typography>} />
+                            ))}
+                          </RadioGroup>
+                        </Box>
+                      ) : (
+                        <TextField fullWidth size="small" label="Days (e.g. 1-7)" value={t.duration} onChange={(e) => updateTherapy(idx, 'duration', e.target.value)} />
+                      )}
+                    </Stack>
+                  </Box>
+                );
+              })}
+
+              <Divider sx={{ my: 2 }} />
+
+              <SectionLabel>3. Schedule</SectionLabel>
+              <TextField fullWidth size="small" label="Document title" value={title} onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }} sx={{ mb: 1.25 }} />
 
               <Stack direction="row" spacing={1} sx={{ mb: 1.25 }}>
-                <TextField
-                  fullWidth size="small" label="Start date" type="date" value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
+                <TextField fullWidth size="small" label="Start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
                 <Tooltip title="Total days in one treatment cycle" placement="top">
-                  <TextField
-                    fullWidth size="small" label="Cycle length" type="number" value={cycleLen}
-                    onChange={(e) => setCycleLen(Math.max(1, Number(e.target.value)))}
-                    inputProps={{ min: 1 }}
-                  />
+                  <TextField fullWidth size="small" label="Cycle length" type="number" value={cycleLen} onChange={(e) => setCycleLen(Math.max(1, Number(e.target.value)))} inputProps={{ min: 1 }} />
                 </Tooltip>
               </Stack>
 
@@ -363,44 +254,19 @@ function CalendarPageInner() {
                     <MenuItem value="Induction">Induction</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField
-                  fullWidth size="small" label="Cycle #" type="number" value={cycleNum}
-                  disabled={phase !== "Cycle"}
-                  onChange={(e) => setCycleNum(Math.max(1, Number(e.target.value)))}
-                  inputProps={{ min: 1 }}
-                />
+                <TextField fullWidth size="small" label="Cycle #" type="number" value={cycleNum} disabled={phase !== "Cycle"} onChange={(e) => setCycleNum(Math.max(1, Number(e.target.value)))} inputProps={{ min: 1 }} />
               </Stack>
 
               <Divider sx={{ my: 2 }} />
 
               <SectionLabel>Optional Note</SectionLabel>
-              <TextField
-                fullWidth size="small" multiline rows={2}
-                placeholder="e.g., Hold venetoclax if ANC < 500…"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-              <FieldHint>Displayed on the calendar beneath the title</FieldHint>
+              <TextField fullWidth size="small" multiline rows={2} placeholder="e.g., Hold venetoclax if ANC < 500…" value={note} onChange={(e) => setNote(e.target.value)} />
 
               <Divider sx={{ my: 2 }} />
 
               <Stack spacing={1}>
-                <Button
-                  variant="contained" fullWidth onClick={runPreview}
-                  disabled={busy || !regimenName}
-                  startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null}
-                  sx={{ py: 1 }}
-                >
-                  {busy ? "Generating…" : "Generate Preview"}
-                </Button>
-                <Button
-                  variant="outlined" fullWidth onClick={runExport}
-                  disabled={exportBusy || !regimenName}
-                  startIcon={exportBusy ? <CircularProgress size={14} /> : null}
-                  sx={{ py: 1 }}
-                >
-                  {exportBusy ? "Exporting…" : "Export DOCX"}
-                </Button>
+                <Button variant="contained" fullWidth onClick={runPreview} disabled={busy || !regimenName} sx={{ py: 1 }}>{busy ? "Generating…" : "Apply Changes & Preview"}</Button>
+                <Button variant="outlined" fullWidth onClick={runExport} disabled={exportBusy || !regimenName} sx={{ py: 1 }}>{exportBusy ? "Exporting…" : "Export DOCX"}</Button>
               </Stack>
 
             </CardContent>
@@ -415,36 +281,24 @@ function CalendarPageInner() {
                   {preview ? (
                     <>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25 }}>
-                        <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
-                          {preview.regimen_title}
-                        </Typography>
+                        <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>{preview.regimen_title}</Typography>
                         <Chip label={preview.label} size="small" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700, background: "#0f4c81", color: "#fff" }} />
                       </Box>
                       <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>{preview.header}</Typography>
-                      {note.trim() && (
-                        <Typography sx={{ fontSize: "0.78rem", color: "#b45309", fontStyle: "italic", mt: 0.25 }}>
-                          {note.trim()}
-                        </Typography>
-                      )}
+                      {note.trim() && <Typography sx={{ fontSize: "0.78rem", color: "#b45309", fontStyle: "italic", mt: 0.25 }}>{note.trim()}</Typography>}
                     </>
                   ) : (
                     <Typography sx={{ fontWeight: 600, color: "#1e293b" }}>Preview</Typography>
                   )}
                 </Box>
-                {preview && (
-                  <Button size="small" variant="outlined" onClick={runExport} disabled={exportBusy} sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>
-                    Export DOCX
-                  </Button>
-                )}
+                {preview && <Button size="small" variant="outlined" onClick={runExport} disabled={exportBusy} sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>Export DOCX</Button>}
               </Box>
 
               <Box sx={{ p: 2, overflowX: "auto" }}>
                 {!preview && !busy && (
                   <Box sx={{ textAlign: "center", py: 8 }}>
                     <Box sx={{ fontSize: "2.5rem", mb: 1.5, opacity: 0.2 }}>◫</Box>
-                    <Typography sx={{ color: "#94a3b8", fontSize: "0.9rem" }}>
-                      {regimenName ? "Click 'Generate Preview' to see the calendar" : "Select a regimen to begin"}
-                    </Typography>
+                    <Typography sx={{ color: "#94a3b8", fontSize: "0.9rem" }}>{regimenName ? "Click 'Apply Changes & Preview' to see the calendar" : "Select a regimen to begin"}</Typography>
                   </Box>
                 )}
                 {busy && (
@@ -469,23 +323,11 @@ function CalendarPageInner() {
             </CardContent>
           </Card>
 
-          {regimen && regimen.therapies.length > 0 && (
+          {customTherapies.length > 0 && (
             <Card variant="outlined" sx={{ mt: 2 }}>
               <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
-                <Typography sx={{ fontWeight: 600, fontSize: "0.875rem", color: "#1e293b", mb: 1.5 }}>
-                  Therapy Summary
-                </Typography>
-                <Box
-                  component="table"
-                  sx={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: "0.8rem",
-                    "& th": { textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", pb: 0.75, borderBottom: "1px solid #e2e8f0" },
-                    "& td": { py: 0.875, pr: 2, verticalAlign: "top", borderBottom: "1px solid #f1f5f9", color: "#334155" },
-                    "& tr:last-child td": { borderBottom: "none" },
-                  }}
-                >
+                <Typography sx={{ fontWeight: 600, fontSize: "0.875rem", color: "#1e293b", mb: 1.5 }}>Therapy Summary</Typography>
+                <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem", "& th": { textAlign: "left", fontWeight: 600, color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.05em", pb: 0.75, borderBottom: "1px solid #e2e8f0" }, "& td": { py: 0.875, pr: 2, verticalAlign: "top", borderBottom: "1px solid #f1f5f9", color: "#334155" }, "& tr:last-child td": { borderBottom: "none" } }}>
                   <thead>
                     <tr>
                       <Box component="th">Agent</Box>
@@ -497,7 +339,7 @@ function CalendarPageInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {regimen.therapies.map((t, i) => (
+                    {customTherapies.map((t, i) => (
                       <tr key={i}>
                         <Box component="td" sx={{ fontWeight: 600, color: "#0f172a" }}>{t.name}</Box>
                         <Box component="td"><Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }} /></Box>
@@ -529,30 +371,11 @@ function LegendItem({ color, border, text }: { color: string; border: string; te
 
 function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
   return (
     <Box sx={{ overflowX: "auto" }}>
-      <Box
-        component="table"
-        sx={{
-          width: "100%",
-          borderCollapse: "separate",
-          borderSpacing: 0,
-          tableLayout: "fixed",
-          fontSize: 13,
-          border: "1px solid #e2e8f0",
-          borderRadius: "8px",
-          overflow: "hidden",
-        }}
-      >
+      <Box component="table" sx={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", fontSize: 13, border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden" }}>
         <thead>
-          <tr>
-            {DAYS.map((d) => (
-              <Box component="th" key={d} sx={{ py: 1, px: 0.75, textAlign: "center", background: "#0f4c81", color: "white", fontWeight: 600, fontSize: "0.75rem", letterSpacing: "0.04em", borderRight: "1px solid rgba(255,255,255,0.1)", "&:last-child": { borderRight: "none" } }}>
-                {d}
-              </Box>
-            ))}
-          </tr>
+          <tr>{DAYS.map((d) => (<Box component="th" key={d} sx={{ py: 1, px: 0.75, textAlign: "center", background: "#0f4c81", color: "white", fontWeight: 600, fontSize: "0.75rem", letterSpacing: "0.04em", borderRight: "1px solid rgba(255,255,255,0.1)", "&:last-child": { borderRight: "none" } }}>{d}</Box>))}</tr>
         </thead>
         <tbody>
           {grid.map((week, wi) => (
@@ -565,22 +388,16 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
                 const isLast = wi === grid.length - 1;
                 return (
                   <Box component="td" key={ci} sx={{ verticalAlign: "top", minWidth: 80, height: 100, p: 0.75, background: isTreatment ? "#eff6ff" : isRest ? "#f0fdf4" : isActive ? "#fafafa" : "#fff", borderRight: ci < 6 ? "1px solid #e2e8f0" : "none", borderBottom: !isLast ? "1px solid #e2e8f0" : "none", transition: "background 0.1s" }}>
-                    <Typography sx={{ textAlign: "right", fontWeight: 700, fontSize: "0.8rem", color: isActive ? "#0f172a" : "#cbd5e1", lineHeight: 1, mb: 0.5 }}>
-                      {dayjs(cell.date).format("MMM D")}
-                    </Typography>
+                    <Typography sx={{ textAlign: "right", fontWeight: 700, fontSize: "0.8rem", color: isActive ? "#0f172a" : "#cbd5e1", lineHeight: 1, mb: 0.5 }}>{dayjs(cell.date).format("MMM D")}</Typography>
                     {isActive && (
                       <>
-                        <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", fontStyle: "italic", lineHeight: 1, mb: 0.5 }}>
-                          Day {cell.cycle_day}
-                        </Typography>
+                        <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", fontStyle: "italic", lineHeight: 1, mb: 0.5 }}>Day {cell.cycle_day}</Typography>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
                           {(cell.labels || []).map((lab, idx) => {
                             const rest = lab.toLowerCase() === "rest";
                             return (
                               <Box key={idx} sx={{ px: 0.5, py: 0.2, borderRadius: "3px", background: rest ? "#dcfce7" : "#dbeafe", display: "inline-flex" }}>
-                                <Typography sx={{ fontSize: "0.68rem", fontWeight: rest ? 500 : 700, color: rest ? "#15803d" : "#1d4ed8", lineHeight: 1.3 }}>
-                                  {lab}
-                                </Typography>
+                                <Typography sx={{ fontSize: "0.68rem", fontWeight: rest ? 500 : 700, color: rest ? "#15803d" : "#1d4ed8", lineHeight: 1.3 }}>{lab}</Typography>
                               </Box>
                             );
                           })}
@@ -595,13 +412,5 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
         </tbody>
       </Box>
     </Box>
-  );
-}
-
-export default function CalendarPage() {
-  return (
-    <React.Suspense fallback={<Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box>}>
-      <CalendarPageInner />
-    </React.Suspense>
   );
 }
