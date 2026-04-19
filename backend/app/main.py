@@ -193,6 +193,21 @@ def calendar_preview(req: CalendarPreviewRequest, bank: PgBank = Depends(get_ban
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
 
+    # --- APPLY CUSTOM DOSES/DURATION OVERRIDE ---
+    if req.therapies_override is not None:
+        reg.therapies = [
+            Chemotherapy(
+                name=t.name,
+                route=t.route,
+                dose=t.dose,
+                frequency=t.frequency,
+                duration=t.duration,
+                total_doses=t.total_doses,
+            )
+            for t in req.therapies_override
+        ]
+    # --------------------------------------------
+
     try:
         start = dt.date.fromisoformat(req.start_date)
     except Exception:
@@ -225,6 +240,21 @@ def calendar_export(req: CalendarPreviewRequest, bank: PgBank = Depends(get_bank
     reg = bank.get_regimen(req.regimen_name)
     if not reg:
         raise HTTPException(status_code=404, detail="Regimen not found")
+
+    # --- APPLY CUSTOM DOSES/DURATION OVERRIDE ---
+    if req.therapies_override is not None:
+        reg.therapies = [
+            Chemotherapy(
+                name=t.name,
+                route=t.route,
+                dose=t.dose,
+                frequency=t.frequency,
+                duration=t.duration,
+                total_doses=t.total_doses,
+            )
+            for t in req.therapies_override
+        ]
+    # --------------------------------------------
 
     try:
         start = dt.date.fromisoformat(req.start_date)
