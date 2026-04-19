@@ -3,7 +3,7 @@
 import * as React from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { listRegimens, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
-import { Regimen, Chemo } from "@/lib/types";
+import { Regimen, Chemo, TherapyOption } from "@/lib/types";
 import {
   Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton,
@@ -22,7 +22,13 @@ const ROUTE_COLORS: Record<string, { bg: string; color: string }> = {
 };
 
 const EMPTY_THERAPY: Chemo = {
-  name: "", route: "IV", dose: "", frequency: "", duration: "", total_doses: null,
+  name: "", 
+  route: "IV", 
+  frequency: "", 
+  options: [{ dose: "", duration: "", total_doses: null }],
+  dose: "", 
+  duration: "", 
+  total_doses: null
 };
 
 const EMPTY_REGIMEN: Regimen = {
@@ -46,101 +52,73 @@ function TherapyDialog({ open, initial, onSave, onClose }: {
   onSave: (t: Chemo) => void; onClose: () => void;
 }) {
   const [t, setT] = React.useState<Chemo>(initial);
-  
-  // State for multiple options
-  const [doses, setDoses] = React.useState<string[]>([""]);
-  const [durations, setDurations] = React.useState<string[]>([""]);
+  const [options, setOptions] = React.useState<TherapyOption[]>([]);
 
   React.useEffect(() => { 
     setT(initial); 
-    setDoses(initial.dose ? initial.dose.split(" | ") : [""]);
-    setDurations(initial.duration ? initial.duration.split(" | ") : [""]);
+    // Fallback for older flat data that might not have the options array yet
+    if (initial.options && initial.options.length > 0) {
+      setOptions(initial.options);
+    } else {
+      setOptions([{ dose: initial.dose || "", duration: initial.duration || "", total_doses: initial.total_doses || null }]);
+    }
   }, [initial, open]);
 
-  const str = (key: keyof Chemo) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setT((p) => ({ ...p, [key]: e.target.value }));
+  const updateOpt = (i: number, field: keyof TherapyOption, val: any) => {
+    const newOpts = [...options];
+    newOpts[i] = { ...newOpts[i], [field]: val };
+    setOptions(newOpts);
+  };
 
-  // Array handlers
-  const updateDose = (i: number, val: string) => { const nd = [...doses]; nd[i] = val; setDoses(nd); };
-  const addDose = () => setDoses([...doses, ""]);
-  const removeDose = (i: number) => setDoses(doses.filter((_, idx) => idx !== i));
+  const addOption = () => setOptions([...options, { dose: "", duration: "", total_doses: null }]);
+  const remOption = (i: number) => setOptions(options.filter((_, idx) => idx !== i));
 
-  const updateDuration = (i: number, val: string) => { const nd = [...durations]; nd[i] = val; setDurations(nd); };
-  const addDuration = () => setDurations([...durations, ""]);
-  const removeDuration = (i: number) => setDurations(durations.filter((_, idx) => idx !== i));
-
-  const valid = t.name.trim() && t.frequency.trim() && doses.some(d => d.trim()) && durations.some(d => d.trim());
+  const valid = t.name.trim() && t.frequency.trim() && options.every(o => o.dose.trim() && o.duration.trim());
 
   const handleSave = () => {
-    const cleanDoses = doses.map(d => d.trim()).filter(Boolean).join(" | ");
-    const cleanDurations = durations.map(d => d.trim()).filter(Boolean).join(" | ");
-    onSave({ ...t, dose: cleanDoses, duration: cleanDurations });
+    // Save the flat fields as the first option just as a fallback
+    const firstOpt = options[0];
+    onSave({ 
+      ...t, 
+      options,
+      dose: firstOpt.dose,
+      duration: firstOpt.duration,
+      total_doses: firstOpt.total_doses
+    });
     onClose();
   };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>
-        {initial.name ? `Edit: ${initial.name}` : "Add Agent"}
-      </DialogTitle>
+      <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>{initial.name ? `Edit: ${initial.name}` : "Add Agent"}</DialogTitle>
       <DialogContent>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
           <Stack direction="row" spacing={1.5}>
-            <TextField label="Agent name *" size="small" fullWidth value={t.name} onChange={str("name")} placeholder="e.g., Venetoclax" />
+            <TextField label="Agent name *" size="small" fullWidth value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} placeholder="e.g., Venetoclax" />
             <FormControl size="small" sx={{ minWidth: 100 }}>
               <InputLabel>Route *</InputLabel>
-              <Select label="Route *" value={t.route} onChange={(e) => setT((p) => ({ ...p, route: e.target.value }))}>
+              <Select label="Route *" value={t.route} onChange={(e) => setT({ ...t, route: e.target.value })}>
                 {ROUTES.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
               </Select>
             </FormControl>
           </Stack>
+          <TextField label="Frequency *" size="small" fullWidth value={t.frequency} onChange={(e) => setT({ ...t, frequency: e.target.value })} placeholder="e.g., once daily" />
 
-          <TextField
-            label="Frequency *" size="small" fullWidth value={t.frequency} onChange={str("frequency")}
-            placeholder="e.g., once daily, BID, weekly"
-          />
-
-          <Divider sx={{ my: 1 }} />
-
-          {/* DOSE OPTIONS */}
-          <Box>
-            <Typography sx={{ fontSize: "0.85rem", fontWeight: 600, color: "#1e293b", mb: 0.5 }}>Dose Options *</Typography>
-            <Typography sx={{ fontSize: "0.72rem", color: "#64748b", mb: 1 }}>Add multiple options if the user should choose from a list (e.g. 70mg, 100mg)</Typography>
-            <Stack spacing={1}>
-              {doses.map((d, i) => (
-                <Stack direction="row" spacing={1} key={`dose-${i}`}>
-                  <TextField size="small" fullWidth value={d} onChange={(e) => updateDose(i, e.target.value)} placeholder="e.g., 100 mg" />
-                  {doses.length > 1 && <Button color="error" variant="outlined" onClick={() => removeDose(i)} sx={{ minWidth: 0, px: 1.5 }}>✕</Button>}
+          <Box sx={{ mt: 2, p: 2, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <Typography sx={{ fontWeight: 700, fontSize: "0.85rem", color: "#1e293b", mb: 0.5 }}>Dosage Variants *</Typography>
+            <Typography sx={{ fontSize: "0.72rem", color: "#64748b", mb: 1.5 }}>Add multiple alternative doses if you want the user to choose from a list.</Typography>
+            
+            <Stack spacing={1.5}>
+              {options.map((opt, i) => (
+                <Stack direction="row" spacing={1} key={i} alignItems="center">
+                  <TextField size="small" label="Dose" value={opt.dose} onChange={(e) => updateOpt(i, "dose", e.target.value)} placeholder="e.g., 100 mg" sx={{ flex: 1 }} />
+                  <TextField size="small" label="Days" value={opt.duration} onChange={(e) => updateOpt(i, "duration", e.target.value)} placeholder="e.g., Days 1-7" sx={{ flex: 1 }} />
+                  {options.length > 1 && <Button color="error" variant="outlined" onClick={() => remOption(i)} sx={{ minWidth: 0, px: 1.5 }}>✕</Button>}
                 </Stack>
               ))}
-              <Button size="small" onClick={addDose} sx={{ alignSelf: "flex-start" }}>+ Add Dose Option</Button>
+              <Button size="small" variant="outlined" onClick={addOption} sx={{ alignSelf: "flex-start", mt: 1 }}>+ Add alternative dose</Button>
             </Stack>
           </Box>
-
-          <Divider sx={{ my: 1 }} />
-
-          {/* DURATION OPTIONS */}
-          <Box>
-            <Typography sx={{ fontSize: "0.85rem", fontWeight: 600, color: "#1e293b", mb: 0.5 }}>Day Map Options *</Typography>
-            <Typography sx={{ fontSize: "0.72rem", color: "#64748b", mb: 1 }}>Add multiple options if the duration varies (e.g. Days 1-7, Days 1-14)</Typography>
-            <Stack spacing={1}>
-              {durations.map((d, i) => (
-                <Stack direction="row" spacing={1} key={`dur-${i}`}>
-                  <TextField size="small" fullWidth value={d} onChange={(e) => updateDuration(i, e.target.value)} placeholder="e.g., Days 1-7" />
-                  {durations.length > 1 && <Button color="error" variant="outlined" onClick={() => removeDuration(i)} sx={{ minWidth: 0, px: 1.5 }}>✕</Button>}
-                </Stack>
-              ))}
-              <Button size="small" onClick={addDuration} sx={{ alignSelf: "flex-start" }}>+ Add Day Option</Button>
-            </Stack>
-          </Box>
-
-          <TextField
-            label="Total doses (optional)" size="small" fullWidth type="number"
-            value={t.total_doses ?? ""}
-            onChange={(e) => setT((p) => ({ ...p, total_doses: e.target.value === "" ? null : Number(e.target.value) }))}
-            inputProps={{ min: 1 }}
-            sx={{ mt: 2 }}
-          />
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
@@ -291,6 +269,8 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: {
             <Stack spacing={1}>
               {reg.therapies.map((t, i) => {
                 const colors = ROUTE_COLORS[t.route?.toUpperCase()] ?? { bg: "#f1f5f9", color: "#475569" };
+                const optsList = t.options && t.options.length > 0 ? t.options : [{ dose: t.dose, duration: t.duration }];
+
                 return (
                   <Box key={i} sx={{ p: 1.5, border: "1px solid #e2e8f0", borderRadius: "6px", background: "#fafafa", display: "flex", gap: 1.5, alignItems: "flex-start" }}>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, pt: 0.25 }}>
@@ -302,13 +282,15 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: {
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
                         <Typography sx={{ fontWeight: 700, fontSize: "0.875rem", color: "#0f172a" }}>{t.name}</Typography>
                         <Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.65rem", fontWeight: 700, background: colors.bg, color: colors.color }} />
+                        <Typography sx={{ fontSize: "0.72rem", color: "#64748b", ml: 0.5 }}>({t.frequency})</Typography>
                       </Box>
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0.75 }}>
-                        {[{ l: "Dose", v: t.dose.replace(/ \| /g, ", ") }, { l: "Frequency", v: t.frequency }, { l: "Days", v: t.duration.replace(/ \| /g, ", ") }].map(({ l, v }) => (
-                          <Box key={l}>
-                            <Typography sx={{ fontSize: "0.62rem", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}</Typography>
-                            <Typography sx={{ fontSize: "0.78rem", color: "#334155" }}>{v}</Typography>
-                          </Box>
+                      
+                      <Box sx={{ mt: 0.5 }}>
+                        {optsList.map((o, oIdx) => (
+                          <Typography key={oIdx} sx={{ fontSize: "0.78rem", color: "#334155", mb: 0.25 }}>
+                            <span style={{color: "#94a3b8", marginRight: 4}}>•</span> 
+                            <strong>{o.dose}</strong> for {o.duration}
+                          </Typography>
                         ))}
                       </Box>
                     </Box>

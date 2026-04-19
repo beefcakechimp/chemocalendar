@@ -10,21 +10,20 @@ Public API:
     upsert_regimen(reg)        -> None
     delete_regimen(name)       -> bool
     save_as(reg, new_name)     -> None
-    get_groups()               -> dict
-    save_groups(groups)        -> None
+    get_all_regimens()         -> List[Regimen]
     close()                    -> None
 """
 from __future__ import annotations
 
 import os
-import json
 import logging
 from dataclasses import replace
 from typing import List, Optional
 
 from psycopg_pool import ConnectionPool
 
-from .regimenbank import Chemotherapy, Regimen, parse_day_spec
+# Make sure TherapyOption is added to your regimenbank.py models!
+from .regimenbank import Chemotherapy, Regimen, TherapyOption, parse_day_spec
 
 logger = logging.getLogger(__name__)
 
@@ -47,37 +46,97 @@ class PgBank:
         with self.pool.connection() as conn:
             row = conn.execute(
                 "SELECT id, name, disease_state, notes, on_study "
-                "FROM regimens WHERE name = %s",
-                (name,),
+                "FROM regimens WHERE name = %s", 
+                (name,)
             ).fetchone()
-            if not row:
+            
+            if not row: 
                 return None
             reg_id, rname, disease_state, notes, on_study = row
 
-            therapy_rows = conn.execute(
-                "SELECT name, route, dose, frequency, duration, total_doses "
-                "FROM therapies WHERE regimen_id = %s ORDER BY id",
-                (reg_id,),
-            ).fetchall()
+            rows = conn.execute("""
+                SELECT t.id, t.name, t.route, t.frequency, o.dose, o.duration, o.total_doses
+                FROM therapies t LEFT JOIN therapy_options o ON t.id = o.therapy_id
+                WHERE t.regimen_id = %s ORDER BY t.id, o.id
+            """, (reg_id,)).fetchall()
 
-        therapies = [
-            Chemotherapy(
-                name=tr[0],
-                route=tr[1],
-                dose=tr[2],
-                frequency=tr[3],
-                duration=tr[4],
-                total_doses=tr[5],
-            )
-            for tr in therapy_rows
-        ]
+        t_dict = {}
+        for r in rows:
+            t_id, t_name, t_route, t_freq, o_dose, o_dur, o_td = r
+            if t_id not in t_dict:
+                t_dict[t_id] = {"name": t_name, "route": t_route, "frequency": t_freq, "options": []}
+            if o_dose is not None:
+                t_dict[t_id]["options"].append(TherapyOption(dose=o_dose, duration=o_dur, total_doses=o_td))
+
+        therapies = []
+        for t in t_dict.values():
+            opts = t["options"]
+            therapies.append(Chemotherapy(
+                name=t["name"], 
+                route=t["route"], 
+                frequency=t["frequency"], 
+                options=opts,
+                # Keep flat fields populated with the first option so calendar generator doesn't break
+                dose=opts[0].dose if opts else "", 
+                duration=opts[0].duration if opts else "", 
+                total_doses=opts[0].total_doses if opts else None
+            ))
+
         return Regimen(
-            name=rname,
-            disease_state=disease_state,
-            on_study=bool(on_study),
-            notes=notes,
-            therapies=therapies,
+            name=rname, 
+            disease_state=disease_state, 
+            on_study=bool(on_study), 
+            notes=notes, 
+            therapies=therapies
         )
+
+    def get_all_regimens(self) -> List[Regimen]:
+        """Fetch all regimens with their therapy options in a highly efficient double-query."""
+        with self.pool.connection() as conn:
+            reg_rows = conn.execute(
+                "SELECT id, name, disease_state, notes, on_study FROM regimens ORDER BY name"
+            ).fetchall()
+            
+            if not reg_rows: 
+                return []
+
+            rows = conn.execute("""
+                SELECT t.regimen_id, t.id, t.name, t.route, t.frequency, o.dose, o.duration, o.total_doses
+                FROM therapies t LEFT JOIN therapy_options o ON t.id = o.therapy_id ORDER BY t.regimen_id, t.id, o.id
+            """).fetchall()
+
+        t_dict = {}
+        for r in rows:
+            reg_id, t_id, t_name, t_route, t_freq, o_dose, o_dur, o_td = r
+            if t_id not in t_dict:
+                t_dict[t_id] = {"reg_id": reg_id, "name": t_name, "route": t_route, "frequency": t_freq, "options": []}
+            if o_dose is not None:
+                t_dict[t_id]["options"].append(TherapyOption(dose=o_dose, duration=o_dur, total_doses=o_td))
+
+        from collections import defaultdict
+        r_map = defaultdict(list)
+        for t in t_dict.values():
+            opts = t["options"]
+            r_map[t["reg_id"]].append(Chemotherapy(
+                name=t["name"], 
+                route=t["route"], 
+                frequency=t["frequency"], 
+                options=opts,
+                dose=opts[0].dose if opts else "", 
+                duration=opts[0].duration if opts else "", 
+                total_doses=opts[0].total_doses if opts else None
+            ))
+
+        results = []
+        for r in reg_rows:
+            results.append(Regimen(
+                name=r[1], 
+                disease_state=r[2], 
+                on_study=bool(r[4]), 
+                notes=r[3], 
+                therapies=r_map.get(r[0], [])
+            ))
+        return results
 
     # ── write ─────────────────────────────────────────────────────────────────
 
@@ -98,32 +157,30 @@ class PgBank:
             ).fetchone()
             reg_id = row[0]
 
-            # Full replace of therapies
-            conn.execute(
-                "DELETE FROM therapies WHERE regimen_id = %s", (reg_id,)
-            )
+            # Clear old therapies (CASCADE will handle clearing the therapy_options table)
+            conn.execute("DELETE FROM therapies WHERE regimen_id = %s", (reg_id,))
+            
             for t in reg.therapies:
-                total_doses = (
-                    t.total_doses
-                    if t.total_doses is not None
-                    else len(parse_day_spec(t.duration))
-                )
-                conn.execute(
-                    """
-                    INSERT INTO therapies
-                        (regimen_id, name, route, dose, frequency, duration, total_doses)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        reg_id,
-                        t.name,
-                        t.route,
-                        t.dose,
-                        t.frequency,
-                        t.duration,
-                        total_doses,
-                    ),
-                )
+                t_row = conn.execute(
+                    "INSERT INTO therapies (regimen_id, name, route, frequency) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (reg_id, t.name, t.route, t.frequency)
+                ).fetchone()
+                t_id = t_row[0]
+
+                # Fallback in case of an old flat API request missing the options list
+                opts_to_save = t.options if t.options else [TherapyOption(dose=t.dose, duration=t.duration, total_doses=t.total_doses)]
+
+                for opt in opts_to_save:
+                    try:
+                        auto_doses = len(parse_day_spec(opt.duration))
+                    except Exception:
+                        auto_doses = None
+                    final_td = opt.total_doses if opt.total_doses is not None else auto_doses
+
+                    conn.execute(
+                        "INSERT INTO therapy_options (therapy_id, dose, duration, total_doses) VALUES (%s, %s, %s, %s)",
+                        (t_id, opt.dose, opt.duration, final_td)
+                    )
 
     def delete_regimen(self, name: str) -> bool:
         with self.pool.connection() as conn:
@@ -135,44 +192,6 @@ class PgBank:
     def save_as(self, reg: Regimen, new_name: str) -> None:
         self.upsert_regimen(replace(reg, name=new_name))
 
-    # ── groups ────────────────────────────────────────────────────────────────
-
-    def get_all_regimens(self) -> List[Regimen]:
-        """Fetch all regimens with their therapies in a highly efficient double-query."""
-        with self.pool.connection() as conn:
-            reg_rows = conn.execute(
-                "SELECT id, name, disease_state, notes, on_study FROM regimens ORDER BY name"
-            ).fetchall()
-
-            if not reg_rows:
-                return []
-
-            therapy_rows = conn.execute(
-                "SELECT regimen_id, name, route, dose, frequency, duration, total_doses "
-                "FROM therapies ORDER BY id"
-            ).fetchall()
-
-        from collections import defaultdict
-        t_map = defaultdict(list)
-        for tr in therapy_rows:
-            t_map[tr[0]].append(
-                Chemotherapy(
-                    name=tr[1], route=tr[2], dose=tr[3], frequency=tr[4], duration=tr[5], total_doses=tr[6]
-                )
-            )
-
-        results = []
-        for row in reg_rows:
-            results.append(Regimen(
-                name=row[1],
-                disease_state=row[2],
-                on_study=bool(row[4]),
-                notes=row[3],
-                therapies=t_map.get(row[0], [])
-            ))
-        return results
-
-
     # ── cleanup ───────────────────────────────────────────────────────────────
 
     def close(self) -> None:
@@ -180,6 +199,7 @@ class PgBank:
             self.pool.close()
         except Exception:
             pass
+
 
 # ── Global Lifecycle Management ──────────────────────────────────────────────
 

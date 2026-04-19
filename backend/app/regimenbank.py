@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-
+from pydantic import BaseModel
+from typing import List, Optional
 import argparse
 import calendar as cal
 import datetime as dt
@@ -85,7 +86,23 @@ class Regimen:
                 return
         self.therapies.append(c)
 
+class TherapyOption(BaseModel):
+    dose: str
+    duration: str
+    total_doses: Optional[int] = None
 
+class Chemotherapy(BaseModel):
+    name: str
+    route: str
+    frequency: str
+    
+    # Nested options for the UI builder
+    options: List[TherapyOption] = []
+    
+    # Flat fields for the active calendar generator
+    dose: str = ""
+    duration: str = ""
+    total_doses: Optional[int] = None
 
 # ---------------- storage (SQLite) ----------------
 class RegimenBank:

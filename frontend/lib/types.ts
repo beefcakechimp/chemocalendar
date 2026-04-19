@@ -1,10 +1,11 @@
-export type Chemo = {
+export interface Chemo {
   name: string;
   route: string;
-  dose: string;
   frequency: string;
+  options: TherapyOption[];
+  dose: string;
   duration: string;
-  total_doses?: number | null;
+  total_doses: number | null;
 };
 
 export type Regimen = {
@@ -38,4 +39,10 @@ export type CalendarPreviewRequest = {
   phase: "Cycle" | "Induction";
   cycle_num?: number | null;
   note?: string | null;
+};
+
+export interface TherapyOption {
+  dose: string;
+  duration: string;
+  total_doses: number | null;
 };

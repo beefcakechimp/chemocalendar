@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
-
+from .regimenbank import Chemotherapy, TherapyOption
 
 class TherapyIn(BaseModel):
     name: str
@@ -49,3 +49,12 @@ class CalendarPreviewResponse(BaseModel):
     first_sun: str
     last_sat: str
     grid: List[List[CalendarCell]]
+
+class TherapyIn(BaseModel):
+    name: str
+    route: str
+    frequency: str
+    options: List[TherapyOption] = []
+    dose: str = ""
+    duration: str = ""
+    total_doses: Optional[int] = None    
