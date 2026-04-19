@@ -16,7 +16,6 @@ from fastapi.responses import StreamingResponse
 from .regimenbank import (
     Chemotherapy,
     Regimen,
-    RegimenVariant,
     export_calendar_docx,
 )
 from .pg_bank import (PgBank, close_bank, get_bank, validate_db)
@@ -37,7 +36,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Validate DB on startup; close cleanly on shutdown."""
     if not validate_db():
-        logger.error("Database validation failed — check DATABASE_URL and connection")
+        logger.error("Database validation failed — check DB_PATH and volume mount")
+        # Don't raise here; let the health check report unhealthy
     yield
     close_bank()
 
@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Chemo Calendar API", lifespan=lifespan)
 
+# CORS: explicit origin for the frontend, plus Railway/Codespaces patterns
 frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
@@ -59,25 +60,17 @@ app.add_middleware(
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _to_chemo(t) -> Chemotherapy:
-    return Chemotherapy(
-        name=t.name,
-        route=t.route,
-        dose=t.dose,
-        frequency=t.frequency,
-        duration=t.duration,
-        total_doses=t.total_doses,
-    )
-
-
 def _to_regimen(rin: RegimenIn) -> Regimen:
-    therapies = [_to_chemo(t) for t in rin.therapies]
-    variants = [
-        RegimenVariant(
-            label=v.label,
-            therapies=[_to_chemo(t) for t in v.therapies],
+    therapies = [
+        Chemotherapy(
+            name=t.name,
+            route=t.route,
+            dose=t.dose,
+            frequency=t.frequency,
+            duration=t.duration,
+            total_doses=t.total_doses,
         )
-        for v in rin.variants
+        for t in rin.therapies
     ]
     return Regimen(
         name=rin.name.strip(),
@@ -85,7 +78,6 @@ def _to_regimen(rin: RegimenIn) -> Regimen:
         on_study=bool(rin.on_study),
         notes=(rin.notes.strip() if rin.notes else None),
         therapies=therapies,
-        variants=variants,
     )
 
 
@@ -116,6 +108,7 @@ def root():
 
 @app.get("/health")
 def health(bank: PgBank = Depends(get_bank)):
+    """Health check that actually verifies DB connectivity."""
     try:
         with bank.pool.connection() as conn:
             conn.execute("SELECT 1")
@@ -149,23 +142,6 @@ def get_regimen(name: str, bank: PgBank = Depends(get_bank)):
                 "total_doses": t.total_doses,
             }
             for t in (r.therapies or [])
-        ],
-        "variants": [
-            {
-                "label": v.label,
-                "therapies": [
-                    {
-                        "name": t.name,
-                        "route": t.route,
-                        "dose": t.dose,
-                        "frequency": t.frequency,
-                        "duration": t.duration,
-                        "total_doses": t.total_doses,
-                    }
-                    for t in v.therapies
-                ],
-            }
-            for v in (r.variants or [])
         ],
     }
 
@@ -228,7 +204,6 @@ def calendar_preview(req: CalendarPreviewRequest, bank: PgBank = Depends(get_ban
         phase=req.phase,
         cycle_num=req.cycle_num,
         title_override=req.title_override,
-        variant_label=req.variant_label,
     )
 
     return CalendarPreviewResponse(
@@ -258,18 +233,15 @@ def calendar_export(req: CalendarPreviewRequest, bank: PgBank = Depends(get_bank
     label = _cycle_label(req.phase, req.cycle_num)
     doc_title = (req.title_override or reg.name).strip() or reg.name
 
-    # Resolve the active therapy list for this variant
-    active_therapies = reg.resolve_therapies(req.variant_label)
-
     reg_for_export = Regimen(
         name=doc_title,
         disease_state=reg.disease_state,
         on_study=reg.on_study,
         notes=reg.notes,
-        therapies=active_therapies,
-        variants=[],
+        therapies=reg.therapies,
     )
 
+    # Write to a proper temp file instead of root filesystem
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 

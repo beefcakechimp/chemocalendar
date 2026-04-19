@@ -78,7 +78,6 @@ function CalendarPageInner() {
   const [phase, setPhase] = React.useState<"Cycle" | "Induction">("Cycle");
   const [cycleNum, setCycleNum] = React.useState<number>(1);
   const [note, setNote] = React.useState<string>("");
-  const [variantLabel, setVariantLabel] = React.useState<string>("");
 
   const [title, setTitle] = React.useState<string>("");
   const [titleDirty, setTitleDirty] = React.useState(false);
@@ -89,12 +88,7 @@ function CalendarPageInner() {
     }
   }, [names, regimenName, preselected]);
 
-  // Reset variant and title dirty flag when regimen changes
-  React.useEffect(() => {
-    setTitleDirty(false);
-    setVariantLabel("");
-  }, [regimenName]);
-
+  React.useEffect(() => { setTitleDirty(false); }, [regimenName]);
   React.useEffect(() => {
     if (regimen?.name && !titleDirty) setTitle(regimen.name);
   }, [regimen?.name, titleDirty]);
@@ -106,7 +100,6 @@ function CalendarPageInner() {
 
   const buildRequest = () => ({
     regimen_name: regimenName,
-    variant_label: variantLabel || null,
     title_override: title.trim() || null,
     start_date: startDate,
     cycle_len: cycleLen,
@@ -149,17 +142,7 @@ function CalendarPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regimenName]);
 
-  // Determine which therapies to display in the summary table
-  const activeTherapies = React.useMemo(() => {
-    if (!regimen) return [];
-    if (variantLabel && regimen.variants?.length) {
-      const v = regimen.variants.find((v) => v.label === variantLabel);
-      if (v) return v.therapies;
-    }
-    return regimen.therapies;
-  }, [regimen, variantLabel]);
-
-  const hasVariants = (regimen?.variants?.length ?? 0) > 0;
+  const therapyCount = regimen?.therapies?.length ?? 0;
 
   return (
     <Box>
@@ -200,7 +183,7 @@ function CalendarPageInner() {
 
               {regimen && (
                 <Box sx={{ mt: 1, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                  <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mb: activeTherapies.length > 0 ? 1 : 0 }}>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mb: therapyCount > 0 ? 1 : 0 }}>
                     <Chip
                       label={regimen.on_study ? "On Study" : "Off Protocol"}
                       size="small"
@@ -219,17 +202,10 @@ function CalendarPageInner() {
                         sx={{ height: 20, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }}
                       />
                     )}
-                    {hasVariants && (
-                      <Chip
-                        label={`${regimen.variants.length} variant${regimen.variants.length !== 1 ? "s" : ""}`}
-                        size="small"
-                        sx={{ height: 20, fontSize: "0.68rem", background: "#fef3c7", color: "#92400e" }}
-                      />
-                    )}
                   </Stack>
-                  {activeTherapies.length > 0 && (
+                  {therapyCount > 0 && (
                     <Box>
-                      {activeTherapies.map((t, i) => (
+                      {regimen.therapies.map((t, i) => (
                         <Box key={i} sx={{ display: "flex", alignItems: "baseline", gap: 0.75, mt: 0.5 }}>
                           <Box component="span" sx={{ display: "inline-block", width: 5, height: 5, borderRadius: "50%", background: "#0f4c81", flexShrink: 0, mt: 0.5 }} />
                           <Typography sx={{ fontSize: "0.75rem", color: "#334155", lineHeight: 1.4 }}>
@@ -240,34 +216,6 @@ function CalendarPageInner() {
                     </Box>
                   )}
                 </Box>
-              )}
-
-              {/* Variant picker — only shown when variants exist */}
-              {hasVariants && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <SectionLabel>Dose Variant</SectionLabel>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Variant</InputLabel>
-                    <Select
-                      label="Variant"
-                      value={variantLabel}
-                      onChange={(e) => setVariantLabel(e.target.value)}
-                    >
-                      <MenuItem value="">
-                        <em>Default (base therapies)</em>
-                      </MenuItem>
-                      {regimen!.variants.map((v) => (
-                        <MenuItem key={v.label} value={v.label}>
-                          {v.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <FieldHint>
-                    Select a dose variant to use different agent doses or schedules
-                  </FieldHint>
-                </>
               )}
 
               <Divider sx={{ my: 2 }} />
@@ -354,14 +302,11 @@ function CalendarPageInner() {
                 <Box>
                   {preview ? (
                     <>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25, flexWrap: "wrap" }}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25 }}>
                         <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
                           {preview.regimen_title}
                         </Typography>
                         <Chip label={preview.label} size="small" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700, background: "#0f4c81", color: "#fff" }} />
-                        {variantLabel && (
-                          <Chip label={variantLabel} size="small" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 600, background: "#fef3c7", color: "#92400e" }} />
-                        )}
                       </Box>
                       <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>{preview.header}</Typography>
                       {note.trim() && (
@@ -412,21 +357,12 @@ function CalendarPageInner() {
             </CardContent>
           </Card>
 
-          {activeTherapies.length > 0 && (
+          {regimen && regimen.therapies.length > 0 && (
             <Card variant="outlined" sx={{ mt: 2 }}>
               <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
-                  <Typography sx={{ fontWeight: 600, fontSize: "0.875rem", color: "#1e293b" }}>
-                    Therapy Summary
-                  </Typography>
-                  {variantLabel && (
-                    <Chip
-                      label={variantLabel}
-                      size="small"
-                      sx={{ height: 18, fontSize: "0.65rem", fontWeight: 600, background: "#fef3c7", color: "#92400e" }}
-                    />
-                  )}
-                </Box>
+                <Typography sx={{ fontWeight: 600, fontSize: "0.875rem", color: "#1e293b", mb: 1.5 }}>
+                  Therapy Summary
+                </Typography>
                 <Box
                   component="table"
                   sx={{
@@ -449,7 +385,7 @@ function CalendarPageInner() {
                     </tr>
                   </thead>
                   <tbody>
-                    {activeTherapies.map((t, i) => (
+                    {regimen.therapies.map((t, i) => (
                       <tr key={i}>
                         <Box component="td" sx={{ fontWeight: 600, color: "#0f172a" }}>{t.name}</Box>
                         <Box component="td"><Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.68rem", background: "#f1f5f9", color: "#475569" }} /></Box>

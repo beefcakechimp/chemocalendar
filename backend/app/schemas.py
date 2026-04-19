@@ -13,18 +13,12 @@ class TherapyIn(BaseModel):
     total_doses: Optional[int] = None
 
 
-class RegimenVariantIn(BaseModel):
-    label: str
-    therapies: List[TherapyIn] = Field(default_factory=list)
-
-
 class RegimenIn(BaseModel):
     name: str
     disease_state: Optional[str] = None
     on_study: bool = False
     notes: Optional[str] = None
     therapies: List[TherapyIn] = Field(default_factory=list)
-    variants: List[RegimenVariantIn] = Field(default_factory=list)
 
 
 class RenameRegimenRequest(BaseModel):
@@ -34,7 +28,6 @@ class RenameRegimenRequest(BaseModel):
 
 class CalendarPreviewRequest(BaseModel):
     regimen_name: str
-    variant_label: Optional[str] = None   # None = use base therapies
     title_override: Optional[str] = None
     start_date: str  # YYYY-MM-DD
     cycle_len: int = 28
