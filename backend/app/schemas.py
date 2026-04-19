@@ -1,30 +1,26 @@
-from __future__ import annotations
-
+from pydantic import BaseModel
 from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
 from .regimenbank import Chemotherapy, TherapyOption
 
 class TherapyIn(BaseModel):
     name: str
     route: str
-    dose: str
     frequency: str
-    duration: str
+    options: List[TherapyOption] = []
+    dose: str = ""
+    duration: str = ""
     total_doses: Optional[int] = None
-
 
 class RegimenIn(BaseModel):
     name: str
     disease_state: Optional[str] = None
     on_study: bool = False
     notes: Optional[str] = None
-    therapies: List[TherapyIn] = Field(default_factory=list)
-
+    therapies: List[TherapyIn]
 
 class RenameRegimenRequest(BaseModel):
     old_name: str
     new_name: str
-
 
 class CalendarPreviewRequest(BaseModel):
     regimen_name: str
@@ -34,13 +30,12 @@ class CalendarPreviewRequest(BaseModel):
     phase: Literal["Cycle", "Induction"] = "Cycle"
     cycle_num: Optional[int] = 1
     note: Optional[str] = None
-
+    therapies_override: Optional[List[TherapyIn]] = None
 
 class CalendarCell(BaseModel):
-    date: str  # YYYY-MM-DD
-    cycle_day: Optional[int] = None
-    labels: List[str] = Field(default_factory=list)
-
+    date: str
+    cycle_day: Optional[int]
+    labels: List[str]
 
 class CalendarPreviewResponse(BaseModel):
     header: str
@@ -49,12 +44,3 @@ class CalendarPreviewResponse(BaseModel):
     first_sun: str
     last_sat: str
     grid: List[List[CalendarCell]]
-
-class TherapyIn(BaseModel):
-    name: str
-    route: str
-    frequency: str
-    options: List[TherapyOption] = []
-    dose: str = ""
-    duration: str = ""
-    total_doses: Optional[int] = None    

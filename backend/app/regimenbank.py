@@ -14,6 +14,26 @@ from dataclasses import dataclass, asdict, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+class TherapyOption(BaseModel):
+    dose: str
+    duration: str
+    total_doses: Optional[int] = None
+
+class Chemotherapy(BaseModel):
+    name: str
+    route: str
+    frequency: str
+    options: List[TherapyOption] = []
+    dose: str = ""
+    duration: str = ""
+    total_doses: Optional[int] = None
+
+class Regimen(BaseModel):
+    name: str
+    disease_state: Optional[str] = None
+    on_study: bool = False
+    notes: Optional[str] = None
+    therapies: List[Chemotherapy]
 # ---------------- config ----------------
 SCHEMA_VERSION = 3
 DEFAULT_DB = Path(__file__).resolve().parent / "regimenbank.db"
@@ -86,23 +106,7 @@ class Regimen:
                 return
         self.therapies.append(c)
 
-class TherapyOption(BaseModel):
-    dose: str
-    duration: str
-    total_doses: Optional[int] = None
 
-class Chemotherapy(BaseModel):
-    name: str
-    route: str
-    frequency: str
-    
-    # Nested options for the UI builder
-    options: List[TherapyOption] = []
-    
-    # Flat fields for the active calendar generator
-    dose: str = ""
-    duration: str = ""
-    total_doses: Optional[int] = None
 
 # ---------------- storage (SQLite) ----------------
 class RegimenBank:
