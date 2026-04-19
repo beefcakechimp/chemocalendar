@@ -33,8 +33,15 @@ class PgBank:
     # ── schema ────────────────────────────────────────────────────────────────
 
     def ensure_schema(self) -> None:
-        """Create all tables if they don't exist and run lightweight migrations."""
+        """Create all tables if they don't exist and run lightweight migrations.
+
+        DDL is run with autocommit=True so each statement commits immediately,
+        avoiding transaction complications on managed Postgres providers
+        (Neon, Supabase, etc.) and ensuring the pool is left in a clean state.
+        """
         with self.pool.connection() as conn:
+            conn.autocommit = True
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS regimens (
                     id            SERIAL PRIMARY KEY,
@@ -46,7 +53,7 @@ class PgBank:
                 )
             """)
 
-            # Variants table
+            # Variants table — must exist before therapies FK references it
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS regimen_variants (
                     id         SERIAL PRIMARY KEY,
@@ -81,20 +88,17 @@ class PgBank:
                 )
             """)
 
-            # Migration: add variant_id column if it doesn't exist on older DBs
+            # ADD COLUMN IF NOT EXISTS (Postgres 9.6+) is safe to re-run and
+            # avoids PL/pgSQL DO blocks which can behave unexpectedly on some
+            # managed providers.
             conn.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns
-                        WHERE table_name='therapies' AND column_name='variant_id'
-                    ) THEN
-                        ALTER TABLE therapies
-                            ADD COLUMN variant_id INTEGER
-                                REFERENCES regimen_variants(id) ON DELETE CASCADE;
-                    END IF;
-                END
-                $$;
+                ALTER TABLE therapies
+                    ADD COLUMN IF NOT EXISTS total_doses INTEGER
+            """)
+            conn.execute("""
+                ALTER TABLE therapies
+                    ADD COLUMN IF NOT EXISTS variant_id INTEGER
+                        REFERENCES regimen_variants(id) ON DELETE CASCADE
             """)
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -148,6 +152,7 @@ class PgBank:
                 (name,),
             ).fetchone()
             if not row:
+                logger.debug("get_regimen: no row found for name=%r", name)
                 return None
             reg_id, rname, disease_state, notes, on_study = row
 
@@ -274,20 +279,24 @@ def validate_db() -> bool:
         pool = ConnectionPool(db_url)
         bank = PgBank(pool)
         bank.ensure_schema()
-        # Verify connectivity
-        with pool.connection() as conn:
-            conn.execute("SELECT 1")
+        logger.info("Database schema validated and ready.")
         _bank_instance = bank
         return True
     except Exception as e:
-        logger.error(f"Database validation failed: {e}")
+        logger.error("Database validation failed: %s", e, exc_info=True)
         return False
 
 
 def get_bank() -> PgBank:
-    """Dependency injected into FastAPI routes to access the DB."""
+    """FastAPI dependency — returns the shared PgBank instance."""
     global _bank_instance
     if _bank_instance is None:
+        # Fallback path: validate_db() in the lifespan should have run first.
+        # If we're here, it either failed or was skipped (e.g. test env).
+        logger.warning(
+            "get_bank() called before validate_db() succeeded — "
+            "attempting lazy init."
+        )
         db_url = os.environ.get("DATABASE_URL")
         if not db_url:
             raise RuntimeError("DATABASE_URL environment variable is missing.")
