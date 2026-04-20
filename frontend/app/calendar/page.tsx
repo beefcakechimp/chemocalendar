@@ -21,7 +21,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, mt: 2.5, "&:first-of-type": { mt: 0 } }}>{children}</Typography>;
 }
 
-export default function CalendarPage() {
+// 1. Rename the main function to CalendarContent (no longer the default export)
+function CalendarContent() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
 
@@ -65,7 +66,7 @@ export default function CalendarPage() {
     cycle_len: cycleLen,
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
-    therapies_override: customTherapies, // Send radio button choices to backend!
+    therapies_override: customTherapies, 
   });
 
   async function runPreview() {
@@ -184,5 +185,14 @@ export default function CalendarPage() {
         </Box>
       </Stack>
     </Box>
+  );
+}
+
+// 2. Create a new default export that wraps CalendarContent in a Suspense boundary
+export default function CalendarPage() {
+  return (
+    <React.Suspense fallback={<Box sx={{ p: 4, textAlign: 'center', color: '#64748b' }}>Loading calendar generator...</Box>}>
+      <CalendarContent />
+    </React.Suspense>
   );
 }
