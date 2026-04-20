@@ -1,3 +1,9 @@
+export type TherapyOption = {
+  dose: string;
+  duration: string;
+  total_doses: number | null;
+};
+
 export type Chemo = {
   name: string;
   route: string;
@@ -5,6 +11,7 @@ export type Chemo = {
   frequency: string;
   duration: string;
   total_doses?: number | null;
+  options?: TherapyOption[]; // <--- The radio button options
 };
 
 export type RegimenVariant = {
