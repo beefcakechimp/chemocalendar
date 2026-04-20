@@ -129,6 +129,23 @@ def list_regimens(bank: PgBank = Depends(get_bank)):
     return bank.list_regimens()
 
 
+# ──> FIX: /regimens/all must be above /regimens/{name} to prevent 404 routing errors
+@app.get("/regimens/all")
+def get_all_regimens_detailed(bank: PgBank = Depends(get_bank)):
+    # If the DB has the optimized all query, use it
+    if hasattr(bank, 'get_all_regimens'):
+        return bank.get_all_regimens()
+    
+    # Safe fallback if get_all_regimens isn't in pg_bank.py
+    names = bank.list_regimens()
+    results = []
+    for n in names:
+        r = bank.get_regimen(n)
+        if r:
+            results.append(r)
+    return results
+
+
 @app.get("/regimens/{name}")
 def get_regimen(name: str, bank: PgBank = Depends(get_bank)):
     r = bank.get_regimen(name)
