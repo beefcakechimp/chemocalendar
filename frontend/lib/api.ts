@@ -63,9 +63,6 @@ export function previewCalendar(body: CalendarPreviewRequest): Promise<CalendarP
   });
 }
 
-export function listAllRegimensDetailed(): Promise<Regimen[]> {
-  return apiFetch<Regimen[]>("/regimens/all");
-}
 
 export async function exportCalendarDocx(
   body: CalendarPreviewRequest

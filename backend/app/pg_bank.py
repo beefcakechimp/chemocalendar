@@ -271,9 +271,9 @@ def validate_db() -> bool:
     global _bank_instance
     db_url = os.environ.get("DATABASE_URL")
 
-    if not db_url:
-        logger.error("DATABASE_URL environment variable is missing.")
-        return False
+    #if not db_url:
+       # logger.error("DATABASE_URL environment variable is missing.")
+        #return False
 
     try:
         pool = ConnectionPool(db_url)
@@ -298,8 +298,8 @@ def get_bank() -> PgBank:
             "attempting lazy init."
         )
         db_url = os.environ.get("DATABASE_URL")
-        if not db_url:
-            raise RuntimeError("DATABASE_URL environment variable is missing.")
+        #if not db_url:
+            #raise RuntimeError("DATABASE_URL environment variable is missing.")
         pool = ConnectionPool(db_url)
         bank = PgBank(pool)
         bank.ensure_schema()
