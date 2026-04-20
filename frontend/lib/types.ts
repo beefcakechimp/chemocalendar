@@ -1,55 +1,51 @@
-export type TherapyOption = {
+export interface TherapyOption {
   dose: string;
   duration: string;
   total_doses: number | null;
-};
+}
 
-export type Chemo = {
+export interface Chemo {
   name: string;
   route: string;
-  dose: string;
   frequency: string;
+  options?: TherapyOption[]; // <--- The radio button options array!
+  
+  // Base fallbacks for the calendar generator
+  dose: string;
   duration: string;
   total_doses?: number | null;
-  options?: TherapyOption[]; // <--- The radio button options
-};
+}
 
-export type RegimenVariant = {
-  label: string;
-  therapies: Chemo[];
-};
-
-export type Regimen = {
+export interface Regimen {
   name: string;
   disease_state?: string | null;
   on_study: boolean;
   notes?: string | null;
   therapies: Chemo[];
-  variants: RegimenVariant[];
-};
+}
 
-export type CalendarCell = {
-  date: string; // YYYY-MM-DD
+export interface CalendarCell {
+  date: string;
   cycle_day: number | null;
   labels: string[];
-};
+}
 
-export type CalendarPreviewResponse = {
+export interface CalendarPreviewResponse {
   header: string;
   label: string;
   regimen_title: string;
   first_sun: string;
   last_sat: string;
   grid: CalendarCell[][];
-};
+}
 
-export type CalendarPreviewRequest = {
+export interface CalendarPreviewRequest {
   regimen_name: string;
-  variant_label?: string | null;
   title_override?: string | null;
   start_date: string; // YYYY-MM-DD
   cycle_len: number;
   phase: "Cycle" | "Induction";
   cycle_num?: number | null;
   note?: string | null;
-};
+  therapies_override?: Chemo[]; // <--- Allows sending radio button choices to backend
+}

@@ -1,8 +1,11 @@
 from __future__ import annotations
-
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
+class TherapyOptionIn(BaseModel):
+    dose: str
+    duration: str
+    total_doses: Optional[int] = None
 
 class TherapyIn(BaseModel):
     name: str
@@ -11,12 +14,7 @@ class TherapyIn(BaseModel):
     frequency: str
     duration: str
     total_doses: Optional[int] = None
-
-
-class RegimenVariantIn(BaseModel):
-    label: str
-    therapies: List[TherapyIn] = Field(default_factory=list)
-
+    options: List[TherapyOptionIn] = Field(default_factory=list)
 
 class RegimenIn(BaseModel):
     name: str
@@ -24,30 +22,33 @@ class RegimenIn(BaseModel):
     on_study: bool = False
     notes: Optional[str] = None
     therapies: List[TherapyIn] = Field(default_factory=list)
-    variants: List[RegimenVariantIn] = Field(default_factory=list)
-
 
 class RenameRegimenRequest(BaseModel):
     old_name: str
     new_name: str
 
+class TherapyOverrideIn(BaseModel):
+    name: str
+    route: str
+    dose: str
+    frequency: str
+    duration: str
+    total_doses: Optional[int] = None
 
 class CalendarPreviewRequest(BaseModel):
     regimen_name: str
-    variant_label: Optional[str] = None   # None = use base therapies
     title_override: Optional[str] = None
     start_date: str  # YYYY-MM-DD
     cycle_len: int = 28
     phase: Literal["Cycle", "Induction"] = "Cycle"
     cycle_num: Optional[int] = 1
     note: Optional[str] = None
-
+    therapies_override: Optional[List[TherapyOverrideIn]] = None
 
 class CalendarCell(BaseModel):
-    date: str  # YYYY-MM-DD
+    date: str
     cycle_day: Optional[int] = None
     labels: List[str] = Field(default_factory=list)
-
 
 class CalendarPreviewResponse(BaseModel):
     header: str
