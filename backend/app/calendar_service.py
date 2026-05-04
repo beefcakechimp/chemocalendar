@@ -1,70 +1,80 @@
-from __future__ import annotations
-
-import calendar as pycal
+"""
+calendar_service.py — Calendar preview generator.
+"""
 import datetime as dt
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-from .regimenbank import Regimen, compute_calendar_grid
-
-
-def _format_month_year_range(first_sun: dt.date, last_sat: dt.date) -> str:
-    fm = pycal.month_name[first_sun.month]
-    lm = pycal.month_name[last_sat.month]
-
-    if first_sun.year == last_sat.year and first_sun.month == last_sat.month:
-        return f"{fm} {first_sun.year}"
-    if first_sun.year == last_sat.year:
-        return f"{fm} – {lm} {first_sun.year}"
-    return f"{fm} {first_sun.year} – {lm} {last_sat.year}"
-
-
-def _cycle_label_from_inputs(phase: str, cycle_num: Optional[int]) -> str:
-    if phase == "Induction":
-        return "Induction"
-    if cycle_num is None:
-        return "Cycle 1"
-    return f"Cycle {cycle_num}"
-
+from .regimenbank import Regimen, parse_day_spec
 
 def build_preview(
     reg: Regimen,
     start: dt.date,
     cycle_len: int,
     phase: str,
-    cycle_num: Optional[int],
-    title_override: Optional[str],
-    variant_label: Optional[str] = None,
-) -> Tuple[str, str, Regimen, dt.date, dt.date, List[List[Dict[str, Any]]]]:
-    label = _cycle_label_from_inputs(phase, cycle_num)
-    cal_title = (title_override or reg.name).strip() or reg.name
-
-    # Resolve which therapy list to use
-    active_therapies = reg.resolve_therapies(variant_label)
-
+    cycle_num: Optional[int] = None,
+    title_override: Optional[str] = None
+) -> Tuple[str, str, Regimen, dt.date, dt.date, List[List[dict]]]:
+    
+    # 1. Labels and Titles
+    if phase == "Induction":
+        label = "Induction"
+    else:
+        label = f"Cycle {cycle_num or 1}"
+        
+    doc_title = (title_override or reg.name).strip() or reg.name
+    
+    # 2. Map therapies to days
+    day_map = {}
+    for t in reg.therapies:
+        active_days = parse_day_spec(t.duration)
+        for d in active_days:
+            if d not in day_map:
+                day_map[d] = []
+            day_map[d].append(t.name)
+    
+    # 3. Grid Bounds (Expand to full Sun-Sat weeks)
+    end_date = start + dt.timedelta(days=cycle_len - 1)
+    first_sun = start - dt.timedelta(days=start.isoweekday() % 7)
+    
+    # 4. Build the Grid
+    grid = []
+    curr_date = first_sun
+    
+    done = False
+    while not done:
+        week = []
+        for _ in range(7):
+            cycle_day = (curr_date - start).days + 1
+            is_active = 1 <= cycle_day <= cycle_len
+            
+            labels = []
+            if is_active:
+                drugs = day_map.get(cycle_day, [])
+                if drugs:
+                    labels.extend(drugs)
+                else:
+                    labels.append("Rest")
+                    
+            week.append({
+                "date": curr_date.isoformat(),
+                "cycle_day": cycle_day if is_active else None,
+                "labels": labels
+            })
+            curr_date += dt.timedelta(days=1)
+        grid.append(week)
+        
+        if curr_date > end_date:
+            done = True
+            
+    last_sat = curr_date - dt.timedelta(days=1)
+    
+    # 5. Clean regimen for preview display
     reg_for_preview = Regimen(
-        name=cal_title,
+        name=doc_title,
         disease_state=reg.disease_state,
         on_study=reg.on_study,
         notes=reg.notes,
-        therapies=active_therapies,
-        variants=[],  # not needed downstream
+        therapies=reg.therapies
     )
-
-    first_sun, last_sat, _, grid = compute_calendar_grid(reg_for_preview, start, cycle_len)
-    header = _format_month_year_range(first_sun, last_sat)
-
-    # Convert grid dates to ISO strings for frontend
-    out_grid: List[List[Dict[str, Any]]] = []
-    for week in grid:
-        w2: List[Dict[str, Any]] = []
-        for cell in week:
-            w2.append(
-                {
-                    "date": cell["date"].isoformat(),
-                    "cycle_day": cell["cycle_day"],
-                    "labels": cell["labels"] or [],
-                }
-            )
-        out_grid.append(w2)
-
-    return header, label, reg_for_preview, first_sun, last_sat, out_grid
+    
+    return doc_title, label, reg_for_preview, first_sun, last_sat, grid
