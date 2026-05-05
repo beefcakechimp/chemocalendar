@@ -58,7 +58,7 @@ function CalendarPageInner() {
     if (regimen?.name && !titleDirty) setTitle(regimen.name);
   }, [regimen?.name, titleDirty]);
 
-  // Restored: Your clean, original state logic without the band-aid
+  // THE FIX: Only rebuild the radio buttons when the regimen name physically changes.
   React.useEffect(() => {
     if (regimen?.therapies) {
       setCustomTherapies(regimen.therapies.map(t => {
@@ -68,7 +68,8 @@ function CalendarPageInner() {
     } else {
       setCustomTherapies([]);
     }
-  }, [regimen]);
+    // Dependency is specifically regimenName, not the mutable 'regimen' object
+  }, [regimenName, regimen?.therapies]);
 
   const [preview, setPreview] = React.useState<CalendarPreviewResponse | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -148,7 +149,7 @@ function CalendarPageInner() {
 
                   {t.options && t.options.length > 1 ? (
                     <RadioGroup 
-                      name={`therapy-group-${idx}`} // The only HTML fix needed to make them click properly
+                      name={`therapy-${idx}`}
                       value={`${t.dose}|${t.duration}`} 
                       onChange={(e) => {
                         const [selDose, selDur] = e.target.value.split('|');
