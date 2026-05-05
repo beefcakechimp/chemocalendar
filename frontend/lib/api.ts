@@ -1,31 +1,47 @@
 import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen } from "@/lib/types";
 
-/**
- * All requests go to /api/* on the same origin (port 3000).
- * Next.js rewrites these server-side to http://localhost:8000/*
- */
 const API_BASE = "/api";
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
-  });
+// 🛡️ The Cold Start Shield: Intercepts and silently handles dead database connections
+async function apiFetch<T>(path: string, init?: RequestInit, retries = 3): Promise<T> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+      cache: "no-store",
+    });
 
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      msg = (j as any)?.detail || msg;
-    } catch {}
-    throw new Error(msg);
+    if (!res.ok) {
+      if (res.status >= 500 && retries > 0) {
+        console.warn(`Database connection stale (Status: ${res.status}). Retrying silently...`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return apiFetch<T>(path, init, retries - 1);
+      }
+      
+      let msg = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        msg = (j as any)?.detail || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+        return {} as T;
+    }
+
+    return (await res.json()) as T;
+  } catch (e: any) {
+    if (retries > 0) {
+      console.warn(`Network glitch detected. Retrying silently...`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return apiFetch<T>(path, init, retries - 1);
+    }
+    throw e;
   }
-
-  return (await res.json()) as T;
 }
 
 export function listRegimens(): Promise<string[]> {
@@ -63,33 +79,44 @@ export function previewCalendar(body: CalendarPreviewRequest): Promise<CalendarP
   });
 }
 
-export function listAllRegimensDetailed(): Promise<Regimen[]> {
-  return apiFetch<Regimen[]>("/regimens/all");
-}
-
 export async function exportCalendarDocx(
   body: CalendarPreviewRequest
 ): Promise<{ blob: Blob; filename: string }> {
-  const res = await fetch(`${API_BASE}/calendar/export`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
+  let retries = 3;
+  while (retries > 0) {
     try {
-      const j = await res.json();
-      msg = (j as any)?.detail || msg;
-    } catch {}
-    throw new Error(msg);
+      const res = await fetch(`${API_BASE}/calendar/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        if (res.status >= 500) {
+          retries--;
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+        let msg = `HTTP ${res.status}`;
+        try {
+          const j = await res.json();
+          msg = (j as any)?.detail || msg;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      const cd = res.headers.get("content-disposition") || "";
+      let filename = "calendar.docx";
+      const m = cd.match(/filename="([^"]+)"/i);
+      if (m?.[1]) filename = m[1];
+
+      const blob = await res.blob();
+      return { blob, filename };
+    } catch (e) {
+      retries--;
+      if (retries === 0) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
   }
-
-  const cd = res.headers.get("content-disposition") || "";
-  let filename = "calendar.docx";
-  const m = cd.match(/filename="([^"]+)"/i);
-  if (m?.[1]) filename = m[1];
-
-  const blob = await res.blob();
-  return { blob, filename };
+  throw new Error("Export completely failed after retries.");
 }

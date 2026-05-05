@@ -21,7 +21,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, mt: 2.5, "&:first-of-type": { mt: 0 } }}>{children}</Typography>;
 }
 
-// 1. Rename the main function to CalendarContent (no longer the default export)
 function CalendarContent() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
@@ -34,6 +33,9 @@ function CalendarContent() {
   const [cycleLen, setCycleLen] = React.useState<number>(28);
   const [phase, setPhase] = React.useState<"Cycle" | "Induction">("Cycle");
   const [cycleNum, setCycleNum] = React.useState<number>(1);
+  const [note, setNote] = React.useState<string>("");
+  const [title, setTitle] = React.useState<string>("");
+  const [titleDirty, setTitleDirty] = React.useState(false);
   
   // State for radio buttons
   const [customTherapies, setCustomTherapies] = React.useState<Chemo[]>([]);
@@ -43,6 +45,11 @@ function CalendarContent() {
       setRegimenName(preselected && names.includes(preselected) ? preselected : names[0]);
     }
   }, [names, regimenName, preselected]);
+
+  React.useEffect(() => { setTitleDirty(false); }, [regimenName]);
+  React.useEffect(() => {
+    if (regimen?.name && !titleDirty) setTitle(regimen.name);
+  }, [regimen?.name, titleDirty]);
 
   // Load options into local state for radio button selection
   React.useEffect(() => {
@@ -62,10 +69,12 @@ function CalendarContent() {
 
   const buildRequest = () => ({
     regimen_name: regimenName,
+    title_override: title.trim() || null,
     start_date: startDate,
     cycle_len: cycleLen,
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
+    note: note.trim() || null,
     therapies_override: customTherapies, 
   });
 
@@ -87,7 +96,11 @@ function CalendarContent() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 700, color: "#0f172a", mb: 3 }}>Calendar Generator</Typography>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: "#0f172a", mb: 0.5 }}>Calendar Generator</Typography>
+        <Typography sx={{ color: "#64748b", fontSize: "0.9rem" }}>Configure a treatment cycle and preview or export the calendar</Typography>
+      </Box>
+
       {err && <Alert severity="error" sx={{ mb: 2 }}>{err}</Alert>}
 
       <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="flex-start">
@@ -101,6 +114,22 @@ function CalendarContent() {
                   {(names || []).map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                 </Select>
               </FormControl>
+
+              {/* RESTORED: Colored Chips for Protocol and Disease State */}
+              {regimen && (
+                <Box sx={{ mt: 1.5, p: 1.25, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap">
+                    <Chip
+                      label={regimen.on_study ? "On Study" : "Off Protocol"}
+                      size="small"
+                      sx={{ height: 20, fontSize: "0.68rem", fontWeight: 600, background: regimen.on_study ? "#dbeafe" : "#f0fdf4", color: regimen.on_study ? "#1d4ed8" : "#15803d" }}
+                    />
+                    {regimen.disease_state && (
+                      <Chip label={regimen.disease_state} size="small" sx={{ height: 20, fontSize: "0.68rem", background: "#e2e8f0", color: "#475569" }} />
+                    )}
+                  </Stack>
+                </Box>
+              )}
 
               <SectionLabel>2. Customize Dose & Days</SectionLabel>
               {customTherapies.map((t, idx) => (
@@ -134,10 +163,30 @@ function CalendarContent() {
               ))}
 
               <SectionLabel>3. Schedule</SectionLabel>
+              
+              {/* RESTORED: Title Override */}
+              <TextField fullWidth size="small" label="Document title" value={title} onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }} sx={{ mb: 1.25 }} />
+
               <Stack direction="row" spacing={1} sx={{ mb: 1.25 }}>
                 <TextField fullWidth size="small" label="Start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
                 <TextField fullWidth size="small" label="Cycle length" type="number" value={cycleLen} onChange={(e) => setCycleLen(Math.max(1, Number(e.target.value)))} />
               </Stack>
+              <Stack direction="row" spacing={1}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Phase</InputLabel>
+                  <Select label="Phase" value={phase} onChange={(e) => setPhase(e.target.value as any)}>
+                    <MenuItem value="Cycle">Cycle</MenuItem>
+                    <MenuItem value="Induction">Induction</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField fullWidth size="small" label="Cycle #" type="number" value={cycleNum} disabled={phase !== "Cycle"} onChange={(e) => setCycleNum(Math.max(1, Number(e.target.value)))} inputProps={{ min: 1 }} />
+              </Stack>
+
+              {/* RESTORED: Optional Notes */}
+              <Divider sx={{ my: 2 }} />
+              <SectionLabel>Optional Note</SectionLabel>
+              <TextField fullWidth size="small" multiline rows={2} placeholder="e.g., Hold venetoclax if ANC < 500…" value={note} onChange={(e) => setNote(e.target.value)} />
+              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8", mt: 0.5, lineHeight: 1.4 }}>Displayed on the calendar beneath the title</Typography>
 
               <Divider sx={{ my: 2 }} />
               <Stack spacing={1}>
@@ -153,7 +202,13 @@ function CalendarContent() {
             <CardContent>
               {preview ? (
                 <Box>
-                  <Typography sx={{ fontWeight: 700, fontSize: "1.2rem", mb: 2 }}>{preview.regimen_title}</Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: "1.2rem", mb: 0.5 }}>{preview.regimen_title}</Typography>
+                  <Typography sx={{ fontSize: "0.8rem", color: "#64748b", mb: 2 }}>{preview.header}</Typography>
+                  {note.trim() && (
+                    <Typography sx={{ fontSize: "0.78rem", color: "#b45309", fontStyle: "italic", mt: -1.5, mb: 2 }}>
+                      {note.trim()}
+                    </Typography>
+                  )}
                   <Box sx={{ overflowX: "auto" }}>
                     <Box component="table" sx={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13, border: "1px solid #e2e8f0", borderRadius: "8px" }}>
                       <thead>
