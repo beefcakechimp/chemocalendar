@@ -58,6 +58,7 @@ function CalendarPageInner() {
     if (regimen?.name && !titleDirty) setTitle(regimen.name);
   }, [regimen?.name, titleDirty]);
 
+  // Restored: Your clean, original state logic without the band-aid
   React.useEffect(() => {
     if (regimen?.therapies) {
       setCustomTherapies(regimen.therapies.map(t => {
@@ -139,42 +140,36 @@ function CalendarPageInner() {
               )}
 
               <SectionLabel>2. Customize Dose & Days</SectionLabel>
-              {customTherapies.map((t, idx) => {
-                const selectedIndex = t.options?.findIndex(o => o.dose === t.dose && o.duration === t.duration) ?? 0;
+              {customTherapies.map((t, idx) => (
+                <Box key={idx} sx={{ mb: 1.5, p: 1.5, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <Typography sx={{ fontWeight: 600, fontSize: "0.85rem", color: "#0f172a", mb: 0.5 }}>
+                    {t.name} <Typography component="span" sx={{ fontSize: '0.75rem', color: '#64748b' }}>({t.route})</Typography>
+                  </Typography>
 
-                return (
-                  <Box key={idx} sx={{ mb: 1.5, p: 1.5, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                    <Typography sx={{ fontWeight: 600, fontSize: "0.85rem", color: "#0f172a", mb: 0.5 }}>
-                      {t.name} <Typography component="span" sx={{ fontSize: '0.75rem', color: '#64748b' }}>({t.route})</Typography>
-                    </Typography>
-
-                    {t.options && t.options.length > 1 ? (
-                      <RadioGroup 
-                        name={`therapy-group-${idx}`}
-                        value={selectedIndex >= 0 ? selectedIndex.toString() : "0"} 
-                        onChange={(e) => {
-                          const selIdx = parseInt(e.target.value, 10);
-                          const selOpt = t.options![selIdx];
-                          if (selOpt) {
-                            const updated = [...customTherapies];
-                            updated[idx] = { ...updated[idx], dose: selOpt.dose, duration: selOpt.duration, total_doses: selOpt.total_doses ?? null };
-                            setCustomTherapies(updated);
-                          }
-                        }}
-                      >
-                        {t.options.map((opt, i) => (
-                          <FormControlLabel key={i} value={i.toString()} control={<Radio size="small" sx={{ py: 0.5 }} />} label={<Typography sx={{fontSize: "0.85rem"}}>{opt.dose} for {opt.duration}</Typography>} />
-                        ))}
-                      </RadioGroup>
-                    ) : (
-                      <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                        <TextField fullWidth size="small" label="Dose" value={t.dose} onChange={(e) => { const updated = [...customTherapies]; updated[idx].dose = e.target.value; setCustomTherapies(updated); }} />
-                        <TextField fullWidth size="small" label="Days" value={t.duration} onChange={(e) => { const updated = [...customTherapies]; updated[idx].duration = e.target.value; updated[idx].total_doses = null; setCustomTherapies(updated); }} />
-                      </Stack>
-                    )}
-                  </Box>
-                );
-              })}
+                  {t.options && t.options.length > 1 ? (
+                    <RadioGroup 
+                      name={`therapy-group-${idx}`} // The only HTML fix needed to make them click properly
+                      value={`${t.dose}|${t.duration}`} 
+                      onChange={(e) => {
+                        const [selDose, selDur] = e.target.value.split('|');
+                        const selOpt = t.options!.find(o => o.dose === selDose && o.duration === selDur);
+                        const updated = [...customTherapies];
+                        updated[idx] = { ...updated[idx], dose: selDose, duration: selDur, total_doses: selOpt?.total_doses || null };
+                        setCustomTherapies(updated);
+                      }}
+                    >
+                      {t.options.map((opt, i) => (
+                        <FormControlLabel key={i} value={`${opt.dose}|${opt.duration}`} control={<Radio size="small" sx={{ py: 0.5 }} />} label={<Typography sx={{fontSize: "0.85rem"}}>{opt.dose} for {opt.duration}</Typography>} />
+                      ))}
+                    </RadioGroup>
+                  ) : (
+                    <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                      <TextField fullWidth size="small" label="Dose" value={t.dose} onChange={(e) => { const updated = [...customTherapies]; updated[idx].dose = e.target.value; setCustomTherapies(updated); }} />
+                      <TextField fullWidth size="small" label="Days" value={t.duration} onChange={(e) => { const updated = [...customTherapies]; updated[idx].duration = e.target.value; updated[idx].total_doses = null; setCustomTherapies(updated); }} />
+                    </Stack>
+                  )}
+                </Box>
+              ))}
 
               <SectionLabel>3. Schedule</SectionLabel>
               <TextField fullWidth size="small" label="Document title" value={title} onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }} sx={{ mb: 1.25 }} />
