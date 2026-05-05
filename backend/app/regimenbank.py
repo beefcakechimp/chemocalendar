@@ -267,9 +267,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     sec.page_width, sec.page_height = Inches(11), Inches(8.5)
     sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    hdr = sec.header
-    try: htbl = hdr.add_table(rows=1, cols=2, width=sec.page_width)
-    except TypeError: htbl = hdr.add_table(rows=1, cols=2)
+    # 🛑 FIX: Put the Name and Logo in the MAIN Document Body, not the hidden header!
+    htbl = doc.add_table(rows=1, cols=2)
     htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     left_cell = htbl.cell(0, 0)
@@ -298,7 +297,6 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     right_p = right_cell.paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    # 🛑 THE LOGO FIX: Look in the parent directory (backend/) instead of backend/app/
     BASE_DIR = Path(__file__).resolve().parent
     logo = BASE_DIR.parent / "ucm.png"
     if not logo.exists():
@@ -309,6 +307,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
             right_p.add_run().add_picture(str(logo), height=Inches(0.76))
         except Exception as e:
             print(f"[WARN] Could not insert logo: {e}")
+            
+    doc.add_paragraph() # Add visual spacer after header
 
     rows = len(grid) + 2
     cols = 7
