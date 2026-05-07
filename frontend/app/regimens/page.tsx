@@ -3,7 +3,7 @@
 import * as React from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import { listRegimens, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
-import { Regimen, Chemo } from "@/lib/types";
+import { Regimen, Chemo, TherapyOption } from "@/lib/types";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress } from "@mui/material";
 import Link from "next/link";
 
@@ -14,41 +14,77 @@ const ROUTE_COLORS: Record<string, { bg: string; color: string }> = {
   IT: { bg: "#fef3c7", color: "#92400e" },
 };
 
-const EMPTY_THERAPY: Chemo = { name: "", route: "IV", dose: "", frequency: "", duration: "", total_doses: null };
+const EMPTY_THERAPY: Chemo = { name: "", route: "IV", dose: "", frequency: "", duration: "", total_doses: null, options: [] };
 const EMPTY_REGIMEN: Regimen = { name: "", disease_state: "", on_study: false, notes: "", therapies: [] };
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", mb: 1, mt: 2.5, "&:first-of-type": { mt: 0 } }}>{children}</Typography>;
 }
 
+// 🛡️ RESTORED: The Dialog that allows building multiple Dosage Variants
 function TherapyDialog({ open, initial, onSave, onClose }: { open: boolean; initial: Chemo; onSave: (t: Chemo) => void; onClose: () => void; }) {
   const [t, setT] = React.useState<Chemo>(initial);
-  React.useEffect(() => { setT(initial); }, [initial, open]);
+  const [options, setOptions] = React.useState<TherapyOption[]>([]);
 
-  const str = (key: keyof Chemo) => (e: React.ChangeEvent<HTMLInputElement>) => setT((p) => ({ ...p, [key]: e.target.value }));
-  const valid = t.name.trim() && t.dose.trim() && t.frequency.trim() && t.duration.trim();
+  React.useEffect(() => { 
+    setT(initial); 
+    if (initial.options && initial.options.length > 0) {
+      setOptions(initial.options);
+    } else {
+      setOptions([{ dose: initial.dose || "", duration: initial.duration || "", total_doses: initial.total_doses || null }]);
+    }
+  }, [initial, open]);
+
+  const updateOpt = (i: number, field: keyof TherapyOption, val: any) => {
+    const newOpts = [...options]; 
+    newOpts[i] = { ...newOpts[i], [field]: val }; 
+    setOptions(newOpts);
+  };
+  
+  const addOption = () => setOptions([...options, { dose: "", duration: "", total_doses: null }]);
+  const remOption = (i: number) => setOptions(options.filter((_, idx) => idx !== i));
+  const valid = t.name.trim() && t.frequency.trim() && options.every(o => o.dose.trim() && o.duration.trim());
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>{initial.name ? `Edit: ${initial.name}` : "Add Agent"}</DialogTitle>
       <DialogContent>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <TextField label="Agent name *" size="small" fullWidth value={t.name} onChange={str("name")} placeholder="e.g., Cytarabine" />
+          <TextField label="Agent name *" size="small" fullWidth value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} placeholder="e.g., Cytarabine" />
           <Stack direction="row" spacing={1.5}>
             <FormControl size="small" sx={{ minWidth: 100 }}>
               <InputLabel>Route *</InputLabel>
-              <Select label="Route *" value={t.route} onChange={(e) => setT((p) => ({ ...p, route: e.target.value }))}>
+              <Select label="Route *" value={t.route || "IV"} onChange={(e) => setT({ ...t, route: e.target.value })}>
                 {ROUTES.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField label="Dose *" size="small" fullWidth value={t.dose} onChange={str("dose")} placeholder="e.g., 100 mg/m²" />
+            <TextField label="Frequency *" size="small" fullWidth value={t.frequency} onChange={(e) => setT({ ...t, frequency: e.target.value })} placeholder="e.g., once daily, BID" />
           </Stack>
-          <TextField label="Frequency *" size="small" fullWidth value={t.frequency} onChange={str("frequency")} placeholder="e.g., once daily, BID, weekly" helperText="Free text — describe how often within a dosing day" />
-          <TextField label="Day map *" size="small" fullWidth value={t.duration} onChange={str("duration")} placeholder="e.g., Days 1-7  or  Days 1,8,15" helperText="Controls which calendar cells are highlighted" />
-          <TextField label="Total doses (optional)" size="small" fullWidth type="number" value={t.total_doses ?? ""} onChange={(e) => setT((p) => ({ ...p, total_doses: e.target.value === "" ? null : Number(e.target.value) }))} inputProps={{ min: 1 }} helperText="Leave blank to auto-calculate from the day map" />
+          
+          <Box sx={{ mt: 2, p: 2, background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <Typography sx={{ fontWeight: 700, fontSize: "0.85rem", mb: 0.5 }}>Dosage Variants (Radio Buttons)</Typography>
+            <Typography sx={{ fontSize: "0.75rem", color: "#64748b", mb: 2 }}>Add multiple variants here to enable radio-button selection on the calendar page.</Typography>
+            <Stack spacing={1.5}>
+              {options.map((opt, i) => (
+                <Stack direction="row" spacing={1} key={i}>
+                  <TextField size="small" label="Dose *" value={opt.dose} onChange={(e) => updateOpt(i, "dose", e.target.value)} sx={{ flex: 1 }} />
+                  <TextField size="small" label="Days *" value={opt.duration} onChange={(e) => updateOpt(i, "duration", e.target.value)} sx={{ flex: 1 }} />
+                  {options.length > 1 && <Button color="error" variant="outlined" onClick={() => remOption(i)} sx={{ minWidth: 40, px: 1 }}>✕</Button>}
+                </Stack>
+              ))}
+              <Button size="small" variant="outlined" onClick={addOption} sx={{ alignSelf: "flex-start" }}>+ Add alternative dose</Button>
+            </Stack>
+          </Box>
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}><Button onClick={onClose} color="inherit">Cancel</Button><Button variant="contained" disabled={!valid} onClick={() => { onSave(t); onClose(); }}>Save Agent</Button></DialogActions>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose} color="inherit">Cancel</Button>
+        <Button variant="contained" disabled={!valid} onClick={() => { 
+          const f = options[0]; 
+          onSave({ ...t, options, dose: f.dose, duration: f.duration, total_doses: f.total_doses }); 
+          onClose(); 
+        }}>Save Agent</Button>
+      </DialogActions>
     </Dialog>
   );
 }
@@ -181,6 +217,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
             <Stack spacing={1}>
               {reg.therapies.map((t, i) => {
                 const colors = ROUTE_COLORS[t.route?.toUpperCase()] ?? { bg: "#f1f5f9", color: "#475569" };
+                const displayOpts = t.options && t.options.length > 0 ? t.options : [{ dose: t.dose, duration: t.duration }];
                 return (
                   <Box key={i} sx={{ p: 1.5, border: "1px solid #e2e8f0", borderRadius: "6px", background: "#fafafa", display: "flex", gap: 1.5, alignItems: "flex-start" }}>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, pt: 0.25 }}>
@@ -195,14 +232,13 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
                         <Typography sx={{ fontWeight: 700, fontSize: "0.875rem", color: "#0f172a" }}>{t.name}</Typography>
                         <Chip label={t.route} size="small" sx={{ height: 18, fontSize: "0.65rem", fontWeight: 700, background: colors.bg, color: colors.color }} />
                       </Box>
-                      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0.75 }}>
-                        {[{ l: "Dose", v: t.dose }, { l: "Frequency", v: t.frequency }, { l: "Days", v: t.duration }].map(({ l, v }) => (
-                          <Box key={l}>
-                            <Typography sx={{ fontSize: "0.62rem", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}</Typography>
-                            <Typography sx={{ fontSize: "0.78rem", color: "#334155" }}>{v}</Typography>
-                          </Box>
-                        ))}
-                      </Box>
+                      <Typography sx={{ fontSize: "0.78rem", color: "#475569", mb: 0.5 }}>Freq: {t.frequency}</Typography>
+                      
+                      {displayOpts.map((o, oIdx) => (
+                        <Typography key={oIdx} sx={{ fontSize: "0.78rem", color: "#334155" }}>
+                          • {o.dose} for {o.duration}
+                        </Typography>
+                      ))}
                     </Box>
                     <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
                       <Button size="small" variant="outlined" onClick={() => setTherapyDialog({ open: true, index: i, initial: t })} sx={{ fontSize: "0.72rem", minWidth: 0, px: 1 }}>Edit</Button>
@@ -229,21 +265,13 @@ export default function RegimensPage() {
     () => getRegimen(selected as string)
   );
 
-  // --- Cold Start Detector ---
   const [isSlowLoad, setIsSlowLoad] = React.useState(false);
   React.useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isLoading) {
-      timer = setTimeout(() => setIsSlowLoad(true), 1500);
-    } else {
-      setIsSlowLoad(false);
-    }
+    if (isLoading) timer = setTimeout(() => setIsSlowLoad(true), 1500);
+    else setIsSlowLoad(false);
     return () => clearTimeout(timer);
   }, [isLoading]);
-
-  React.useEffect(() => {
-    if (selected === "__new__" && names && names.length && !selectedRegimen) {}
-  }, [names, selected, selectedRegimen]);
 
   const filtered = React.useMemo(() => {
     const xs = names || [];
@@ -272,7 +300,6 @@ export default function RegimensPage() {
             </Box>
             <Divider />
 
-            {/* Replaced Skeleton with the Slow Load Detector */}
             {isLoading && (
                <Box sx={{ p: 3, textAlign: "center" }}>
                  <CircularProgress size={24} sx={{ mb: 1, color: "#0f4c81" }} />
