@@ -26,6 +26,7 @@ def _supports_ansi() -> bool:
 def _italic(s: str) -> str:
     return f"\x1b[3m{s}\x1b[0m" if _supports_ansi() else s
 
+# ADDED: Missing TherapyOption dataclass required by pg_bank.py
 @dataclass
 class TherapyOption:
     dose: str
@@ -40,22 +41,23 @@ class Chemotherapy:
     frequency: str
     duration: str
     total_doses: Optional[int] = None
+    # ADDED: Missing options list required by pg_bank.py
     options: List[TherapyOption] = field(default_factory=list)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Chemotherapy":
         opts_data = d.get("options", [])
-        parsed_opts = []
-        for o in opts_data:
-            parsed_opts.append(TherapyOption(
-                dose=o.get("dose", ""),
-                duration=o.get("duration", ""),
+        parsed_opts = [
+            TherapyOption(
+                dose=o.get("dose", ""), 
+                duration=o.get("duration", ""), 
                 total_doses=o.get("total_doses")
-            ))
-            
+            ) for o in opts_data
+        ]
         return Chemotherapy(
             d["name"], d["route"], d["dose"], d["frequency"], d["duration"], d.get("total_doses"), parsed_opts
         )
+
 @dataclass
 class Regimen:
     name: str
@@ -282,7 +284,7 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     sec.page_width, sec.page_height = Inches(11), Inches(8.5)
     sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    # 🛑 FIX: Put the Name and Logo in the MAIN Document Body, not the hidden header!
+    # 🛑 THE LOGO FIX: Put the Name and Logo in the MAIN document body, not the header!
     htbl = doc.add_table(rows=1, cols=2)
     htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
 
@@ -312,14 +314,23 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     right_p = right_cell.paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    BASE_DIR = Path(__file__).resolve().parent
-    logo = BASE_DIR.parent / "ucm.png"
-    if not logo.exists():
-        logo = BASE_DIR / "ucm.png" # Fallback
+    # Search for the logo in every possible Docker/Local location
+    logo_path = None
+    possible_paths = [
+        Path(__file__).resolve().parent.parent / "ucm.png", # Local backend folder
+        Path(__file__).resolve().parent / "ucm.png",        # Local backend/app folder
+        Path.cwd() / "ucm.png",                             # Docker /app folder
+        Path.cwd() / "backend" / "ucm.png",                 # Workspace root
+        Path("/app/ucm.png")                                # Hardcoded Docker fallback
+    ]
+    for p in possible_paths:
+        if p.exists():
+            logo_path = p
+            break
 
-    if logo.exists():
+    if logo_path:
         try:
-            right_p.add_run().add_picture(str(logo), height=Inches(0.76))
+            right_p.add_run().add_picture(str(logo_path), height=Inches(0.76))
         except Exception as e:
             print(f"[WARN] Could not insert logo: {e}")
             

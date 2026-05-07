@@ -58,7 +58,7 @@ function CalendarPageInner() {
     if (regimen?.name && !titleDirty) setTitle(regimen.name);
   }, [regimen?.name, titleDirty]);
 
-  // THE FIX: Only rebuild the radio buttons when the regimen name physically changes.
+  // FIX: Tie the therapy building to regimenName so SWR background refresh doesn't wipe out your selected radio buttons
   React.useEffect(() => {
     if (regimen?.therapies) {
       setCustomTherapies(regimen.therapies.map(t => {
@@ -68,7 +68,6 @@ function CalendarPageInner() {
     } else {
       setCustomTherapies([]);
     }
-    // Dependency is specifically regimenName, not the mutable 'regimen' object
   }, [regimenName, regimen?.therapies]);
 
   const [preview, setPreview] = React.useState<CalendarPreviewResponse | null>(null);
@@ -149,7 +148,7 @@ function CalendarPageInner() {
 
                   {t.options && t.options.length > 1 ? (
                     <RadioGroup 
-                      name={`therapy-${idx}`}
+                      name={`therapy-${idx}`} // FIX: Name parameter so browser groups them correctly
                       value={`${t.dose}|${t.duration}`} 
                       onChange={(e) => {
                         const [selDose, selDur] = e.target.value.split('|');
