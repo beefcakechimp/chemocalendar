@@ -27,6 +27,12 @@ def _italic(s: str) -> str:
     return f"\x1b[3m{s}\x1b[0m" if _supports_ansi() else s
 
 @dataclass
+class TherapyOption:
+    dose: str
+    duration: str
+    total_doses: Optional[int] = None
+
+@dataclass
 class Chemotherapy:
     name: str
     route: str
@@ -34,13 +40,22 @@ class Chemotherapy:
     frequency: str
     duration: str
     total_doses: Optional[int] = None
+    options: List[TherapyOption] = field(default_factory=list)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Chemotherapy":
+        opts_data = d.get("options", [])
+        parsed_opts = []
+        for o in opts_data:
+            parsed_opts.append(TherapyOption(
+                dose=o.get("dose", ""),
+                duration=o.get("duration", ""),
+                total_doses=o.get("total_doses")
+            ))
+            
         return Chemotherapy(
-            d["name"], d["route"], d["dose"], d["frequency"], d["duration"], d.get("total_doses")
+            d["name"], d["route"], d["dose"], d["frequency"], d["duration"], d.get("total_doses"), parsed_opts
         )
-
 @dataclass
 class Regimen:
     name: str
