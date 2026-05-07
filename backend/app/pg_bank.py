@@ -92,6 +92,12 @@ class PgBank:
         except Exception: pass
 
 _bank_instance: Optional[PgBank] = None
+def _ensure_schema(pool: ConnectionPool) -> None:
+    with pool.connection() as conn:
+        conn.execute("""
+            ALTER TABLE therapies ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'
+        """)
+
 def validate_db() -> bool:
     global _bank_instance
     db_url = os.environ.get("DATABASE_URL")
@@ -99,6 +105,7 @@ def validate_db() -> bool:
     try:
         pool = ConnectionPool(db_url)
         with pool.connection() as conn: conn.execute("SELECT 1")
+        _ensure_schema(pool)
         _bank_instance = PgBank(pool)
         return True
     except Exception: return False

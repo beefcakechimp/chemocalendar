@@ -110,6 +110,7 @@ class RegimenBank:
                 id INTEGER PRIMARY KEY AUTOINCREMENT, regimen_id INTEGER NOT NULL,
                 name TEXT NOT NULL, route TEXT NOT NULL, dose TEXT NOT NULL,
                 frequency TEXT NOT NULL, duration TEXT NOT NULL, total_doses INTEGER,
+                options TEXT NOT NULL DEFAULT '[]',
                 FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE
             )
         """)
@@ -121,6 +122,8 @@ class RegimenBank:
         cols = [row["name"] for row in cur.fetchall()]
         if "total_doses" not in cols:
             cur.execute("ALTER TABLE therapies ADD COLUMN total_doses INTEGER")
+        if "options" not in cols:
+            cur.execute("ALTER TABLE therapies ADD COLUMN options TEXT NOT NULL DEFAULT '[]'")
         self.conn.commit()
 
     def list_regimens(self) -> List[str]:
@@ -136,14 +139,19 @@ class RegimenBank:
         if not row: return None
 
         reg_id = row["id"]
+        import json as _json
         cur_t = self.conn.execute(
-            "SELECT name, route, dose, frequency, duration, total_doses FROM therapies WHERE regimen_id = ? ORDER BY id",
+            "SELECT name, route, dose, frequency, duration, total_doses, options FROM therapies WHERE regimen_id = ? ORDER BY id",
             (reg_id,)
         )
-        therapies = [
-            Chemotherapy(trow["name"], trow["route"], trow["dose"], trow["frequency"], trow["duration"], trow["total_doses"])
-            for trow in cur_t.fetchall()
-        ]
+        therapies = []
+        for trow in cur_t.fetchall():
+            raw_opts = trow["options"] or "[]"
+            parsed_opts = [
+                TherapyOption(dose=o.get("dose", ""), duration=o.get("duration", ""), total_doses=o.get("total_doses"))
+                for o in _json.loads(raw_opts)
+            ]
+            therapies.append(Chemotherapy(trow["name"], trow["route"], trow["dose"], trow["frequency"], trow["duration"], trow["total_doses"], parsed_opts))
 
         return Regimen(
             name=row["name"], disease_state=row["disease_state"], on_study=bool(row["on_study"]),
@@ -169,11 +177,13 @@ class RegimenBank:
                 )
                 reg_id = self.conn.execute("SELECT id FROM regimens WHERE name = ?", (reg.name,)).fetchone()["id"]
 
+            import json as _json
             for t in reg.therapies:
                 total_doses = t.total_doses if t.total_doses is not None else len(parse_day_spec(t.duration))
+                opts_json = _json.dumps([{"dose": o.dose, "duration": o.duration, "total_doses": o.total_doses} for o in t.options])
                 self.conn.execute(
-                    "INSERT INTO therapies(regimen_id, name, route, dose, frequency, duration, total_doses) VALUES(?, ?, ?, ?, ?, ?, ?)",
-                    (reg_id, t.name, t.route, t.dose, t.frequency, t.duration, total_doses),
+                    "INSERT INTO therapies(regimen_id, name, route, dose, frequency, duration, total_doses, options) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    (reg_id, t.name, t.route, t.dose, t.frequency, t.duration, total_doses, opts_json),
                 )
 
     def delete_regimen(self, name: str) -> bool:
@@ -472,7 +482,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
             day_list = parse_day_spec(t.duration)
             total_doses = len(day_list)
 
-        sentence = f"{t.name}: {verb} {route_phrase} {freq_text} on {dur_text} (total {total_doses} dose{'s' if total_doses != 1 else ''})."
+        dose_text = t.dose.strip()
+        sentence = f"{t.name}: {verb} {dose_text} {route_phrase} {freq_text} on {dur_text} (total {total_doses} dose{'s' if total_doses != 1 else ''})."
         p = doc.add_paragraph(style="List Bullet")
         run = p.add_run(sentence)
         run.font.size = Pt(12)

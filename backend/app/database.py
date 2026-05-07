@@ -40,8 +40,12 @@ def init_db() -> None:
                 dose        TEXT NOT NULL,
                 frequency   TEXT NOT NULL,
                 duration    TEXT NOT NULL,
-                total_doses INTEGER
+                total_doses INTEGER,
+                options     JSONB NOT NULL DEFAULT '[]'
             )
+        """)
+        conn.execute("""
+            ALTER TABLE therapies ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'
         """)
         # Single-row table for the groups JSON blob.
         # The singleton=1 constraint enforces at most one row.
