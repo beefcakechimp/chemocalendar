@@ -83,8 +83,7 @@ function CalendarPageInner() {
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
     note: note.trim() || null,
-    // Send null when not yet populated so the backend uses stored DB therapies
-    therapies_override: customTherapies.length > 0 ? customTherapies : null,
+    therapies_override: customTherapies.length > 0 ? customTherapies : undefined,
   });
 
   async function runPreview() {
