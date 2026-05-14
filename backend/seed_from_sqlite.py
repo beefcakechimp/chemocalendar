@@ -83,8 +83,12 @@ with psycopg.connect(database_url) as pg:
             dose        TEXT NOT NULL,
             frequency   TEXT NOT NULL,
             duration    TEXT NOT NULL,
-            total_doses INTEGER
+            total_doses INTEGER,
+            options     JSONB NOT NULL DEFAULT '[]'
         )
+    """)
+    pg.execute("""
+        ALTER TABLE therapies ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'
     """)
     pg.execute("""
         CREATE TABLE IF NOT EXISTS regimen_groups (

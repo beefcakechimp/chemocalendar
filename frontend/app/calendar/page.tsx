@@ -83,7 +83,7 @@ function CalendarPageInner() {
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
     note: note.trim() || null,
-    therapies_override: customTherapies, 
+    therapies_override: customTherapies.length > 0 ? customTherapies : undefined,
   });
 
   async function runPreview() {
