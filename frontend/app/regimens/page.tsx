@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import useSWR, { mutate as globalMutate } from "swr";
-import { listRegimens, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
-import { Regimen, Chemo, TherapyOption } from "@/lib/types";
+import { listRegimensDetailed, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
+import { Regimen, Chemo, TherapyOption, RegimenSummary } from "@/lib/types";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress } from "@mui/material";
 import Link from "next/link";
 
@@ -256,9 +256,13 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
 }
 
 export default function RegimensPage() {
-  const { data: names, error, isLoading } = useSWR("regimens", listRegimens);
+  const { data: summaries, error, isLoading } = useSWR("regimens-detailed", listRegimensDetailed);
+  const names = React.useMemo(() => summaries?.map(r => r.name) ?? [], [summaries]);
+
   const [selected, setSelected] = React.useState<string | "__new__">("__new__");
   const [q, setQ] = React.useState("");
+  const [folderOpen, setFolderOpen] = React.useState({ onStudy: true, offProtocol: true });
+  const [dsOpen, setDsOpen] = React.useState<Record<string, boolean>>({});
 
   const { data: selectedRegimen, isLoading: regLoading } = useSWR<Regimen>(
     selected && selected !== "__new__" ? ["regimen", selected] : null,
@@ -273,11 +277,87 @@ export default function RegimensPage() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
-  const filtered = React.useMemo(() => {
-    const xs = names || [];
+  const grouped = React.useMemo(() => {
+    if (!summaries) return null;
+    const onStudy: Record<string, string[]> = {};
+    const offProtocol: Record<string, string[]> = {};
+    for (const r of [...summaries].sort((a, b) => a.name.localeCompare(b.name))) {
+      const ds = r.disease_state?.trim() || "(None)";
+      const bucket = r.on_study ? onStudy : offProtocol;
+      (bucket[ds] ??= []).push(r.name);
+    }
+    return { onStudy, offProtocol };
+  }, [summaries]);
+
+  const searchResults = React.useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return qq ? xs.filter((n) => n.toLowerCase().includes(qq)) : xs;
+    return qq ? names.filter(n => n.toLowerCase().includes(qq)) : [];
   }, [names, q]);
+
+  const toggleDs = (key: string) => setDsOpen(p => ({ ...p, [key]: !(p[key] ?? true) }));
+
+  const RegimenItem = ({ name }: { name: string }) => (
+    <ListItemButton
+      selected={selected === name}
+      onClick={() => setSelected(name)}
+      sx={{ borderRadius: "5px", mb: 0.25, px: 1.5, py: 0.75, "&.Mui-selected": { background: "#eff6ff", "& .rn": { color: "#0f4c81", fontWeight: 700 } } }}
+    >
+      <Typography className="rn" sx={{ fontSize: "0.85rem", fontWeight: 500, color: "#1e293b" }} noWrap>{name}</Typography>
+    </ListItemButton>
+  );
+
+  const DsGroup = ({ folderKey, ds, items }: { folderKey: string; ds: string; items: string[] }) => {
+    const gKey = `${folderKey}:${ds}`;
+    const isOpen = dsOpen[gKey] ?? true;
+    return (
+      <Box>
+        <Box
+          onClick={() => toggleDs(gKey)}
+          sx={{ display: "flex", alignItems: "center", px: 1.5, py: 0.5, ml: 1, cursor: "pointer", userSelect: "none", borderRadius: "4px", "&:hover": { background: "#f1f5f9" } }}
+        >
+          <Box component="span" sx={{ fontSize: "0.55rem", mr: 0.75, color: "#94a3b8", display: "inline-block", transition: "transform 0.15s", transform: isOpen ? "rotate(90deg)" : "none" }}>▶</Box>
+          <Typography sx={{ fontWeight: 600, fontSize: "0.72rem", color: "#64748b", flex: 1, fontStyle: ds === "(None)" ? "italic" : "normal" }}>{ds}</Typography>
+          <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8" }}>{items.length}</Typography>
+        </Box>
+        {isOpen && (
+          <List disablePadding dense sx={{ pl: 2 }}>
+            {items.map(n => <RegimenItem key={n} name={n} />)}
+          </List>
+        )}
+      </Box>
+    );
+  };
+
+  const FolderSection = ({
+    title, fKey, groups, dotColor,
+  }: { title: string; fKey: "onStudy" | "offProtocol"; groups: Record<string, string[]>; dotColor: string }) => {
+    const count = Object.values(groups).reduce((s, a) => s + a.length, 0);
+    if (count === 0) return null;
+    const isOpen = folderOpen[fKey];
+    const sortedDs = Object.keys(groups).sort((a, b) =>
+      a === "(None)" ? 1 : b === "(None)" ? -1 : a.localeCompare(b)
+    );
+    return (
+      <Box sx={{ mb: 0.5 }}>
+        <Box
+          onClick={() => setFolderOpen(p => ({ ...p, [fKey]: !p[fKey] }))}
+          sx={{ display: "flex", alignItems: "center", px: 1.5, py: 0.875, cursor: "pointer", userSelect: "none", borderRadius: "5px", "&:hover": { background: "#f1f5f9" } }}
+        >
+          <Box component="span" sx={{ fontSize: "0.6rem", mr: 0.75, color: "#475569", display: "inline-block", transition: "transform 0.15s", transform: isOpen ? "rotate(90deg)" : "none" }}>▶</Box>
+          <Box sx={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, mr: 1, flexShrink: 0 }} />
+          <Typography sx={{ fontWeight: 700, fontSize: "0.82rem", color: "#1e293b", flex: 1 }}>{title}</Typography>
+          <Box sx={{ px: 0.75, py: 0.1, borderRadius: "10px", background: dotColor + "20" }}>
+            <Typography sx={{ fontSize: "0.68rem", color: dotColor, fontWeight: 700 }}>{count}</Typography>
+          </Box>
+        </Box>
+        {isOpen && (
+          <Box sx={{ mb: 0.5 }}>
+            {sortedDs.map(ds => <DsGroup key={ds} folderKey={fKey} ds={ds} items={groups[ds]} />)}
+          </Box>
+        )}
+      </Box>
+    );
+  };
 
   const editorKey = selected;
   const editorInitial = selected === "__new__" ? EMPTY_REGIMEN : (selectedRegimen ?? null);
@@ -301,34 +381,41 @@ export default function RegimensPage() {
             <Divider />
 
             {isLoading && (
-               <Box sx={{ p: 3, textAlign: "center" }}>
-                 <CircularProgress size={24} sx={{ mb: 1, color: "#0f4c81" }} />
-                 {isSlowLoad ? (
-                   <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>Waking up secure database...<br/>This takes a few seconds.</Typography>
-                 ) : (
-                   <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>Loading regimens...</Typography>
-                 )}
-               </Box>
+              <Box sx={{ p: 3, textAlign: "center" }}>
+                <CircularProgress size={24} sx={{ mb: 1, color: "#0f4c81" }} />
+                {isSlowLoad ? (
+                  <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>Waking up secure database...<br />This takes a few seconds.</Typography>
+                ) : (
+                  <Typography sx={{ fontSize: "0.8rem", color: "#64748b" }}>Loading regimens...</Typography>
+                )}
+              </Box>
             )}
 
             {error && <Alert severity="error" sx={{ m: 1.5 }}>Failed to load regimens. Server may be offline.</Alert>}
 
-            <Box sx={{ maxHeight: 500, overflowY: "auto" }}>
-              <List disablePadding dense sx={{ px: 1, py: 0.75 }}>
-                {filtered.map((n) => (
-                  <ListItemButton key={n} selected={selected === n} onClick={() => setSelected(n)} sx={{ borderRadius: "5px", mb: 0.25, px: 1.5, py: 0.875, "&.Mui-selected": { background: "#eff6ff", "& .rn": { color: "#0f4c81", fontWeight: 700 } } }}>
-                    <Box>
-                      <Typography className="rn" sx={{ fontSize: "0.875rem", fontWeight: 500, color: "#1e293b" }} noWrap>{n}</Typography>
-                    </Box>
-                  </ListItemButton>
-                ))}
-                {!isLoading && filtered.length === 0 && (
-                  <Box sx={{ textAlign: "center", py: 3 }}><Typography sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>No regimens found</Typography></Box>
-                )}
-              </List>
+            <Box sx={{ maxHeight: 520, overflowY: "auto" }}>
+              {!isLoading && !error && (
+                q.trim() ? (
+                  <List disablePadding dense sx={{ px: 1, py: 0.75 }}>
+                    {searchResults.map(n => <RegimenItem key={n} name={n} />)}
+                    {searchResults.length === 0 && (
+                      <Box sx={{ textAlign: "center", py: 3 }}><Typography sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>No regimens found</Typography></Box>
+                    )}
+                  </List>
+                ) : grouped ? (
+                  <Box sx={{ px: 1, py: 0.75 }}>
+                    <FolderSection title="On Study" fKey="onStudy" groups={grouped.onStudy} dotColor="#1d4ed8" />
+                    <FolderSection title="Off Protocol" fKey="offProtocol" groups={grouped.offProtocol} dotColor="#15803d" />
+                    {names.length === 0 && (
+                      <Box sx={{ textAlign: "center", py: 3 }}><Typography sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>No regimens yet</Typography></Box>
+                    )}
+                  </Box>
+                ) : null
+              )}
             </Box>
+
             <Box sx={{ px: 2, py: 1, borderTop: "1px solid #e2e8f0" }}>
-              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>{names?.length ?? 0} regimen{(names?.length ?? 0) !== 1 ? "s" : ""} total</Typography>
+              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>{names.length} regimen{names.length !== 1 ? "s" : ""} total</Typography>
             </Box>
           </CardContent>
         </Card>
@@ -337,7 +424,13 @@ export default function RegimensPage() {
           {regLoading && selected !== "__new__" ? (
             <Card variant="outlined"><CardContent sx={{ p: 2.5 }}>{[...Array(4)].map((_, i) => <Box key={i} sx={{ height: i === 0 ? 28 : 44, mb: 1, borderRadius: "5px", background: "#f1f5f9" }} />)}</CardContent></Card>
           ) : editorInitial !== null ? (
-            <RegimenEditor key={editorKey} initial={editorInitial} isNew={selected === "__new__"} onSaved={(name) => { setSelected(name); globalMutate(["regimen", name]); }} onDeleted={() => setSelected(names?.find((n) => n !== selected) ?? "__new__")} />
+            <RegimenEditor
+              key={editorKey}
+              initial={editorInitial}
+              isNew={selected === "__new__"}
+              onSaved={(name) => { setSelected(name); globalMutate(["regimen", name]); globalMutate("regimens-detailed"); }}
+              onDeleted={() => { setSelected(names.find(n => n !== selected) ?? "__new__"); globalMutate("regimens-detailed"); }}
+            />
           ) : null}
         </Box>
       </Stack>

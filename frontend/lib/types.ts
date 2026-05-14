@@ -39,6 +39,12 @@ export interface CalendarPreviewResponse {
   grid: CalendarCell[][];
 }
 
+export interface RegimenSummary {
+  name: string;
+  disease_state: string | null;
+  on_study: boolean;
+}
+
 export interface CalendarPreviewRequest {
   regimen_name: string;
   title_override?: string | null;

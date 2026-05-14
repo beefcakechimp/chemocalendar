@@ -1,4 +1,4 @@
-import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen } from "@/lib/types";
+import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen, RegimenSummary } from "@/lib/types";
 
 const API_BASE = "/api";
 
@@ -46,6 +46,12 @@ async function apiFetch<T>(path: string, init?: RequestInit, retries = 3): Promi
 
 export function listRegimens(): Promise<string[]> {
   return apiFetch<string[]>("/regimens");
+}
+
+export function listRegimensDetailed(): Promise<RegimenSummary[]> {
+  return apiFetch<Regimen[]>("/regimens/all").then(regs =>
+    regs.map(r => ({ name: r.name, disease_state: r.disease_state ?? null, on_study: r.on_study }))
+  );
 }
 
 export function getRegimen(name: string): Promise<Regimen> {
