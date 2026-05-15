@@ -43,7 +43,7 @@ export default function UserPicker({ open, onClose, onPicked }: { open: boolean;
       <DialogTitle sx={{ fontWeight: 700, pb: 1 }}>Who are you?</DialogTitle>
       <DialogContent>
         <Typography sx={{ fontSize: "0.85rem", color: "#64748b", mb: 2 }}>
-          Your name is attached to every regimen change in the audit log. Pick from your team or add yourself.
+          Add or select a user to proceed
         </Typography>
 
         {err && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErr("")}>{err}</Alert>}
