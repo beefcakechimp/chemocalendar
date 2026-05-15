@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import useSWR from "swr";
-import { listRegimensDetailed } from "@/lib/api";
-import { RegimenSummary } from "@/lib/types";
+import { listRegimensDetailed, listUsers } from "@/lib/api";
+import { RegimenSummary, User } from "@/lib/types";
 import {
   Box, Card, CardContent, Typography, TextField, List, ListItemButton,
-  Stack, InputAdornment, Skeleton, Alert,
+  Stack, InputAdornment, Skeleton, Alert, FormControl, InputLabel, Select, MenuItem, Divider,
 } from "@mui/material";
 import Link from "next/link";
+import { useCurrentUser } from "@/lib/user";
 
 function StatCard({ label, value, sub, color = "#0f4c81" }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
@@ -40,29 +41,46 @@ function RegimenRow({ r }: { r: RegimenSummary }) {
 
 export default function DashboardPage() {
   const { data: summaries, error, isLoading } = useSWR("regimens-detailed", listRegimensDetailed);
+  const { data: users } = useSWR<User[]>("users", listUsers);
+  const [currentUser] = useCurrentUser();
   const [q, setQ] = React.useState("");
   const [folderOpen, setFolderOpen] = React.useState({ onStudy: true, offProtocol: true });
   const [dsOpen, setDsOpen] = React.useState<Record<string, boolean>>({});
+  const [userFilter, setUserFilter] = React.useState<string>("__all__");
+
+  const filteredSummaries = React.useMemo(() => {
+    if (!summaries) return [];
+    if (userFilter === "__all__") return summaries;
+    const target = userFilter === "__me__" ? currentUser : userFilter;
+    if (!target) return summaries;
+    return summaries.filter(r => r.created_by === target);
+  }, [summaries, userFilter, currentUser]);
 
   const grouped = React.useMemo(() => {
-    if (!summaries) return null;
     const onStudy: Record<string, RegimenSummary[]> = {};
     const offProtocol: Record<string, RegimenSummary[]> = {};
-    for (const r of [...summaries].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const r of [...filteredSummaries].sort((a, b) => a.name.localeCompare(b.name))) {
       const ds = r.disease_state?.trim() || "(None)";
       const bucket = r.on_study ? onStudy : offProtocol;
       (bucket[ds] ??= []).push(r);
     }
     return { onStudy, offProtocol };
-  }, [summaries]);
+  }, [filteredSummaries]);
 
   const searchResults = React.useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return qq ? (summaries ?? []).filter(r => r.name.toLowerCase().includes(qq)).sort((a, b) => a.name.localeCompare(b.name)) : [];
-  }, [summaries, q]);
+    return qq ? filteredSummaries.filter(r => r.name.toLowerCase().includes(qq)).sort((a, b) => a.name.localeCompare(b.name)) : [];
+  }, [filteredSummaries, q]);
 
   const totalCount = summaries?.length ?? 0;
   const onStudyCount = summaries?.filter(r => r.on_study).length ?? 0;
+  const filteredCount = filteredSummaries.length;
+
+  const creatorUsernames = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const r of summaries ?? []) if (r.created_by) set.add(r.created_by);
+    return Array.from(set).sort();
+  }, [summaries]);
 
   const toggleDs = (key: string) => setDsOpen(p => ({ ...p, [key]: !(p[key] ?? true) }));
 
@@ -157,19 +175,37 @@ export default function DashboardPage() {
 
       <Card variant="outlined">
         <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
-          <Box sx={{ px: 2.5, pt: 2.25, pb: 1.5, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
+          <Box sx={{ px: 2.5, pt: 2.25, pb: 1.5, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
             <Box>
               <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", color: "#1e293b" }}>Regimen Library</Typography>
-              <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>Click any regimen to open in the calendar generator</Typography>
+              <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
+                {userFilter === "__all__"
+                  ? "Click any regimen to open in the calendar generator"
+                  : `${filteredCount} of ${totalCount} regimens shown`}
+              </Typography>
             </Box>
-            <TextField
-              placeholder="Search regimens…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              size="small"
-              sx={{ width: 220 }}
-              InputProps={{ startAdornment: <InputAdornment position="start"><Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box></InputAdornment> }}
-            />
+            <Stack direction="row" spacing={1} alignItems="center">
+              <FormControl size="small" sx={{ minWidth: 160 }}>
+                <InputLabel sx={{ fontSize: "0.8rem" }}>Created by</InputLabel>
+                <Select label="Created by" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} sx={{ fontSize: "0.82rem" }}>
+                  <MenuItem value="__all__" sx={{ fontSize: "0.82rem" }}>Everyone</MenuItem>
+                  {currentUser && <MenuItem value="__me__" sx={{ fontSize: "0.82rem", fontWeight: 600 }}>Me ({currentUser})</MenuItem>}
+                  <Divider />
+                  {creatorUsernames.map(u => {
+                    const usr = users?.find(x => x.username === u);
+                    return <MenuItem key={u} value={u} sx={{ fontSize: "0.82rem" }}>{usr?.display_name || u}</MenuItem>;
+                  })}
+                </Select>
+              </FormControl>
+              <TextField
+                placeholder="Search regimens…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                size="small"
+                sx={{ width: 200 }}
+                InputProps={{ startAdornment: <InputAdornment position="start"><Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box></InputAdornment> }}
+              />
+            </Stack>
           </Box>
 
           <Box sx={{ px: 1.5, py: 1.5, maxHeight: 480, overflowY: "auto" }}>

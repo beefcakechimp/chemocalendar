@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { CssBaseline, Box, Typography, Divider } from "@mui/material";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
 import React from "react";
+import UserBadge from "@/components/UserBadge";
 
 const LinkBehavior = React.forwardRef<HTMLAnchorElement, any>(function LinkBehavior(props, ref) {
   const { href, ...other } = props;
@@ -220,6 +221,7 @@ export default function Providers({ children }: { children: ReactNode }) {
               borderBottom: "1px solid #e2e8f0",
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
               px: 3,
               flexShrink: 0,
             }}
@@ -241,6 +243,7 @@ export default function Providers({ children }: { children: ReactNode }) {
                 Educational / clinical support tool — always verify independently
               </Typography>
             </Box>
+            <UserBadge />
           </Box>
 
           {/* Page content */}

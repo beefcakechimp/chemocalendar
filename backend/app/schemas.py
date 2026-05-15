@@ -27,6 +27,10 @@ class RenameRegimenRequest(BaseModel):
     old_name: str
     new_name: str
 
+class UserIn(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+
 class TherapyOverrideIn(BaseModel):
     name: str
     route: str

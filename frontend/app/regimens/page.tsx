@@ -2,10 +2,12 @@
 
 import * as React from "react";
 import useSWR, { mutate as globalMutate } from "swr";
-import { listRegimensDetailed, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
-import { Regimen, Chemo, TherapyOption, RegimenSummary } from "@/lib/types";
+import { listRegimensDetailed, getRegimen, upsertRegimen, deleteRegimen, listUsers } from "@/lib/api";
+import { Regimen, Chemo, TherapyOption, RegimenSummary, User } from "@/lib/types";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress } from "@mui/material";
 import Link from "next/link";
+import AuditLogDialog from "@/components/AuditLogDialog";
+import { useCurrentUser } from "@/lib/user";
 
 const ROUTES = ["IV", "PO", "SQ", "IM", "IT"];
 const ROUTE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -99,7 +101,7 @@ function ConfirmDialog({ open, title, message, confirmLabel = "Delete", onConfir
   );
 }
 
-function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regimen; onSaved: (name: string) => void; onDeleted: () => void; isNew: boolean; }) {
+function RegimenEditor({ initial, onSaved, onDeleted, onShowHistory, isNew }: { initial: Regimen; onSaved: (name: string) => void; onDeleted: () => void; onShowHistory?: () => void; isNew: boolean; }) {
   const [reg, setReg] = React.useState<Regimen>(initial);
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState("");
@@ -168,8 +170,15 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
                 )}
               </Box>
               {dirty && <Typography sx={{ fontSize: "0.72rem", color: "#b45309", mt: 0.25 }}>● Unsaved changes</Typography>}
+              {!isNew && (initial.created_by || initial.updated_by) && (
+                <Typography sx={{ fontSize: "0.7rem", color: "#94a3b8", mt: 0.25 }}>
+                  {initial.created_by && <>Created by <strong>{initial.created_by}</strong></>}
+                  {initial.updated_by && initial.updated_by !== initial.created_by && <> · Last edit by <strong>{initial.updated_by}</strong></>}
+                </Typography>
+              )}
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap">
+              {!isNew && onShowHistory && <Button size="small" variant="outlined" onClick={onShowHistory} sx={{ fontSize: "0.78rem" }}>History</Button>}
               {!isNew && <Button size="small" color="error" variant="outlined" onClick={() => setConfirmDelete(true)} sx={{ fontSize: "0.78rem" }}>Delete</Button>}
               {!isNew && <Button size="small" variant="outlined" component={Link} href={`/calendar?regimen=${encodeURIComponent(initial.name)}`} sx={{ fontSize: "0.78rem", whiteSpace: "nowrap" }}>Open in calendar →</Button>}
               <Button size="small" variant="contained" onClick={handleSave} disabled={saving || !dirty} sx={{ fontSize: "0.78rem" }}>{saving ? "Saving…" : "Save"}</Button>
@@ -257,12 +266,16 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
 
 export default function RegimensPage() {
   const { data: summaries, error, isLoading } = useSWR("regimens-detailed", listRegimensDetailed);
+  const { data: users } = useSWR<User[]>("users", listUsers);
+  const [currentUser] = useCurrentUser();
   const names = React.useMemo(() => summaries?.map(r => r.name) ?? [], [summaries]);
 
   const [selected, setSelected] = React.useState<string | "__new__">("__new__");
   const [q, setQ] = React.useState("");
   const [folderOpen, setFolderOpen] = React.useState({ onStudy: true, offProtocol: true });
   const [dsOpen, setDsOpen] = React.useState<Record<string, boolean>>({});
+  const [userFilter, setUserFilter] = React.useState<string>("__all__"); // "__all__" | "__me__" | username
+  const [auditDialog, setAuditDialog] = React.useState<{ open: boolean; regimen?: string }>({ open: false });
 
   const { data: selectedRegimen, isLoading: regLoading } = useSWR<Regimen>(
     selected && selected !== "__new__" ? ["regimen", selected] : null,
@@ -277,22 +290,36 @@ export default function RegimensPage() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
+  const filteredSummaries = React.useMemo(() => {
+    if (!summaries) return [];
+    if (userFilter === "__all__") return summaries;
+    const target = userFilter === "__me__" ? currentUser : userFilter;
+    if (!target) return summaries;
+    return summaries.filter(r => r.created_by === target);
+  }, [summaries, userFilter, currentUser]);
+
   const grouped = React.useMemo(() => {
-    if (!summaries) return null;
     const onStudy: Record<string, string[]> = {};
     const offProtocol: Record<string, string[]> = {};
-    for (const r of [...summaries].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const r of [...filteredSummaries].sort((a, b) => a.name.localeCompare(b.name))) {
       const ds = r.disease_state?.trim() || "(None)";
       const bucket = r.on_study ? onStudy : offProtocol;
       (bucket[ds] ??= []).push(r.name);
     }
     return { onStudy, offProtocol };
-  }, [summaries]);
+  }, [filteredSummaries]);
 
   const searchResults = React.useMemo(() => {
     const qq = q.trim().toLowerCase();
-    return qq ? names.filter(n => n.toLowerCase().includes(qq)) : [];
-  }, [names, q]);
+    return qq ? filteredSummaries.map(r => r.name).filter(n => n.toLowerCase().includes(qq)) : [];
+  }, [filteredSummaries, q]);
+
+  const filteredCount = filteredSummaries.length;
+  const creatorUsernames = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const r of summaries ?? []) if (r.created_by) set.add(r.created_by);
+    return Array.from(set).sort();
+  }, [summaries]);
 
   const toggleDs = (key: string) => setDsOpen(p => ({ ...p, [key]: !(p[key] ?? true) }));
 
@@ -378,6 +405,25 @@ export default function RegimensPage() {
             <Box sx={{ px: 1.5, pb: 0.75 }}>
               <Button fullWidth size="small" variant={selected === "__new__" ? "contained" : "outlined"} onClick={() => setSelected("__new__")} sx={{ justifyContent: "flex-start", fontSize: "0.8rem", py: 0.75 }}>+ New regimen</Button>
             </Box>
+
+            <Box sx={{ px: 1.5, pb: 1 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel sx={{ fontSize: "0.78rem" }}>Created by</InputLabel>
+                <Select label="Created by" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} sx={{ fontSize: "0.8rem" }}>
+                  <MenuItem value="__all__" sx={{ fontSize: "0.8rem" }}>Everyone</MenuItem>
+                  {currentUser && <MenuItem value="__me__" sx={{ fontSize: "0.8rem", fontWeight: 600 }}>Me ({currentUser})</MenuItem>}
+                  <Divider />
+                  {creatorUsernames.map(u => {
+                    const usr = users?.find(x => x.username === u);
+                    return <MenuItem key={u} value={u} sx={{ fontSize: "0.8rem" }}>{usr?.display_name || u}</MenuItem>;
+                  })}
+                </Select>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ px: 1.5, pb: 0.75 }}>
+              <Button fullWidth size="small" variant="text" onClick={() => setAuditDialog({ open: true })} sx={{ fontSize: "0.78rem", color: "#64748b", justifyContent: "flex-start" }}>📜 View all activity</Button>
+            </Box>
             <Divider />
 
             {isLoading && (
@@ -415,7 +461,11 @@ export default function RegimensPage() {
             </Box>
 
             <Box sx={{ px: 2, py: 1, borderTop: "1px solid #e2e8f0" }}>
-              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>{names.length} regimen{names.length !== 1 ? "s" : ""} total</Typography>
+              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>
+                {userFilter === "__all__"
+                  ? `${names.length} regimen${names.length !== 1 ? "s" : ""} total`
+                  : `${filteredCount} of ${names.length} shown`}
+              </Typography>
             </Box>
           </CardContent>
         </Card>
@@ -430,10 +480,17 @@ export default function RegimensPage() {
               isNew={selected === "__new__"}
               onSaved={(name) => { setSelected(name); globalMutate(["regimen", name]); globalMutate("regimens-detailed"); }}
               onDeleted={() => { setSelected(names.find(n => n !== selected) ?? "__new__"); globalMutate("regimens-detailed"); }}
+              onShowHistory={selected !== "__new__" ? () => setAuditDialog({ open: true, regimen: selected as string }) : undefined}
             />
           ) : null}
         </Box>
       </Stack>
+
+      <AuditLogDialog
+        open={auditDialog.open}
+        onClose={() => setAuditDialog({ open: false })}
+        regimenName={auditDialog.regimen}
+      />
     </Box>
   );
 }

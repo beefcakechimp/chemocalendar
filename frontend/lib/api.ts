@@ -1,6 +1,12 @@
-import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen, RegimenSummary } from "@/lib/types";
+import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen, RegimenSummary, User, AuditEntry } from "@/lib/types";
+import { getCurrentUser } from "@/lib/user";
 
 const API_BASE = "/api";
+
+function userHeader(): Record<string, string> {
+  const u = typeof window !== "undefined" ? getCurrentUser() : null;
+  return u ? { "X-User": u } : {};
+}
 
 // 🛡️ The Cold Start Shield: Intercepts and silently handles dead database connections
 async function apiFetch<T>(path: string, init?: RequestInit, retries = 3): Promise<T> {
@@ -9,6 +15,7 @@ async function apiFetch<T>(path: string, init?: RequestInit, retries = 3): Promi
       ...init,
       headers: {
         "Content-Type": "application/json",
+        ...userHeader(),
         ...(init?.headers || {}),
       },
       cache: "no-store",
@@ -50,8 +57,34 @@ export function listRegimens(): Promise<string[]> {
 
 export function listRegimensDetailed(): Promise<RegimenSummary[]> {
   return apiFetch<Regimen[]>("/regimens/all").then(regs =>
-    regs.map(r => ({ name: r.name, disease_state: r.disease_state ?? null, on_study: r.on_study }))
+    regs.map(r => ({
+      name: r.name,
+      disease_state: r.disease_state ?? null,
+      on_study: r.on_study,
+      created_by: r.created_by ?? null,
+      updated_by: r.updated_by ?? null,
+    }))
   );
+}
+
+export function listUsers(): Promise<User[]> {
+  return apiFetch<User[]>("/users");
+}
+
+export function createUser(username: string, display_name?: string | null): Promise<User> {
+  return apiFetch<User>("/users", {
+    method: "POST",
+    body: JSON.stringify({ username, display_name: display_name || null }),
+  });
+}
+
+export function getAuditLog(params: { regimen_name?: string; username?: string; limit?: number } = {}): Promise<AuditEntry[]> {
+  const q = new URLSearchParams();
+  if (params.regimen_name) q.set("regimen_name", params.regimen_name);
+  if (params.username) q.set("username", params.username);
+  if (params.limit) q.set("limit", String(params.limit));
+  const qs = q.toString();
+  return apiFetch<AuditEntry[]>(`/audit${qs ? `?${qs}` : ""}`);
 }
 
 export function getRegimen(name: string): Promise<Regimen> {
