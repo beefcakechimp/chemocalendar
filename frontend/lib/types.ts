@@ -22,6 +22,8 @@ export interface Regimen {
   on_study: boolean;
   notes?: string | null;
   therapies: Chemo[];
+  created_by?: string | null;
+  updated_by?: string | null;
 }
 
 export interface CalendarCell {
@@ -43,6 +45,28 @@ export interface RegimenSummary {
   name: string;
   disease_state: string | null;
   on_study: boolean;
+  created_by?: string | null;
+  updated_by?: string | null;
+}
+
+export interface User {
+  username: string;
+  display_name: string | null;
+  created_at: string | null;
+}
+
+export interface AuditEntry {
+  id: number;
+  regimen_id: number | null;
+  regimen_name: string;
+  action: "create" | "update" | "delete" | string;
+  username: string;
+  timestamp: string;
+  diff: {
+    before?: Record<string, any> | null;
+    after?: Record<string, any> | null;
+    fields_changed?: string[];
+  };
 }
 
 export interface CalendarPreviewRequest {

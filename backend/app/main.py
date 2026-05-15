@@ -7,16 +7,40 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .regimenbank import Chemotherapy, Regimen, TherapyOption, export_calendar_docx
 from .pg_bank import (PgBank, close_bank, get_bank, validate_db)
-from .schemas import CalendarPreviewRequest, CalendarPreviewResponse, RegimenIn, RenameRegimenRequest
+from .schemas import CalendarPreviewRequest, CalendarPreviewResponse, RegimenIn, RenameRegimenRequest, UserIn
 from .calendar_service import build_preview
+
+
+def current_user(x_user: str = Header(default="anonymous")) -> str:
+    u = (x_user or "").strip().lower()
+    return u or "anonymous"
+
+
+def _serialize_regimen(r: Regimen) -> dict:
+    return {
+        "name": r.name,
+        "disease_state": r.disease_state,
+        "on_study": r.on_study,
+        "notes": r.notes,
+        "created_by": getattr(r, "created_by", None),
+        "updated_by": getattr(r, "updated_by", None),
+        "therapies": [
+            {
+                "name": t.name, "route": t.route, "dose": t.dose, "frequency": t.frequency,
+                "duration": t.duration, "total_doses": t.total_doses,
+                "options": [{"dose": o.dose, "duration": o.duration, "total_doses": o.total_doses} for o in getattr(t, "options", [])]
+            }
+            for t in (r.therapies or [])
+        ],
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +88,12 @@ def health(bank: PgBank = Depends(get_bank)):
 
 @app.get("/regimens/all")
 def get_all_regimens_detailed(bank: PgBank = Depends(get_bank)):
-    if hasattr(bank, 'get_all_regimens'): return bank.get_all_regimens()
+    if hasattr(bank, 'get_all_regimens'):
+        return [_serialize_regimen(r) for r in bank.get_all_regimens()]
     results = []
     for n in bank.list_regimens():
         r = bank.get_regimen(n)
-        if r: results.append(r)
+        if r: results.append(_serialize_regimen(r))
     return results
 
 @app.get("/regimens", response_model=List[str])
@@ -78,44 +103,53 @@ def list_regimens(bank: PgBank = Depends(get_bank)): return bank.list_regimens()
 def get_regimen(name: str, bank: PgBank = Depends(get_bank)):
     r = bank.get_regimen(name)
     if not r: raise HTTPException(status_code=404, detail="Regimen not found")
-    return {
-        "name": r.name,
-        "disease_state": r.disease_state,
-        "on_study": r.on_study,
-        "notes": r.notes,
-        "therapies": [
-            {
-                "name": t.name, "route": t.route, "dose": t.dose, "frequency": t.frequency, 
-                "duration": t.duration, "total_doses": t.total_doses,
-                "options": [{"dose": o.dose, "duration": o.duration, "total_doses": o.total_doses} for o in getattr(t, 'options', [])]
-            }
-            for t in (r.therapies or [])
-        ],
-    }
+    return _serialize_regimen(r)
 
 @app.post("/regimens")
-def upsert_regimen(body: RegimenIn, bank: PgBank = Depends(get_bank)):
+def upsert_regimen(body: RegimenIn, bank: PgBank = Depends(get_bank), user: str = Depends(current_user)):
     reg = _to_regimen(body)
     if not reg.name: raise HTTPException(status_code=400, detail="Regimen name is required")
-    bank.upsert_regimen(reg)
-    return {"ok": True}
+    result = bank.upsert_regimen(reg, username=user)
+    return {"ok": True, **result}
 
 @app.delete("/regimens/{name:path}")
-def delete_regimen(name: str, bank: PgBank = Depends(get_bank)):
-    if not bank.delete_regimen(name): raise HTTPException(status_code=404, detail="Regimen not found")
+def delete_regimen(name: str, bank: PgBank = Depends(get_bank), user: str = Depends(current_user)):
+    if not bank.delete_regimen(name, username=user): raise HTTPException(status_code=404, detail="Regimen not found")
     return {"ok": True}
 
 @app.post("/regimens/rename")
-def rename_regimen(body: RenameRegimenRequest, bank: PgBank = Depends(get_bank)):
+def rename_regimen(body: RenameRegimenRequest, bank: PgBank = Depends(get_bank), user: str = Depends(current_user)):
     old, new = body.old_name.strip(), body.new_name.strip()
     if not old or not new: raise HTTPException(status_code=400, detail="old_name and new_name required")
     if old == new: return {"ok": True}
     r = bank.get_regimen(old)
     if not r: raise HTTPException(status_code=404, detail="Regimen not found")
     if bank.get_regimen(new): raise HTTPException(status_code=409, detail="A regimen with new_name already exists")
-    bank.save_as(r, new)
-    bank.delete_regimen(old)
+    bank.save_as(r, new, username=user)
+    bank.delete_regimen(old, username=user)
     return {"ok": True}
+
+# ── Users ──────────────────────────────────────────────────────────────────
+@app.get("/users")
+def list_users(bank: PgBank = Depends(get_bank)):
+    return bank.list_users()
+
+@app.post("/users")
+def create_user(body: UserIn, bank: PgBank = Depends(get_bank)):
+    try:
+        return bank.create_user(body.username, body.display_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ── Audit log ──────────────────────────────────────────────────────────────
+@app.get("/audit")
+def get_audit_log(
+    regimen_name: Optional[str] = Query(default=None),
+    username: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    bank: PgBank = Depends(get_bank),
+):
+    return bank.get_audit_log(regimen_name=regimen_name, username=username, limit=limit)
 
 @app.post("/calendar/preview", response_model=CalendarPreviewResponse)
 def calendar_preview(req: CalendarPreviewRequest, bank: PgBank = Depends(get_bank)):

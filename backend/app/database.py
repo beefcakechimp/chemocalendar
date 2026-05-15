@@ -27,9 +27,13 @@ def init_db() -> None:
                 disease_state TEXT,
                 on_study      BOOLEAN NOT NULL DEFAULT FALSE,
                 notes         TEXT,
+                created_by    TEXT,
+                updated_by    TEXT,
                 updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        conn.execute("ALTER TABLE regimens ADD COLUMN IF NOT EXISTS created_by TEXT")
+        conn.execute("ALTER TABLE regimens ADD COLUMN IF NOT EXISTS updated_by TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS therapies (
                 id          SERIAL PRIMARY KEY,
@@ -47,8 +51,29 @@ def init_db() -> None:
         conn.execute("""
             ALTER TABLE therapies ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            SERIAL PRIMARY KEY,
+                username      TEXT NOT NULL UNIQUE,
+                display_name  TEXT,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS regimen_changes (
+                id            SERIAL PRIMARY KEY,
+                regimen_id    INTEGER,
+                regimen_name  TEXT NOT NULL,
+                action        TEXT NOT NULL,
+                username      TEXT NOT NULL,
+                timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                diff          JSONB NOT NULL DEFAULT '{}'
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_regimen_changes_name ON regimen_changes(regimen_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_regimen_changes_user ON regimen_changes(username)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_regimen_changes_ts ON regimen_changes(timestamp DESC)")
         # Single-row table for the groups JSON blob.
-        # The singleton=1 constraint enforces at most one row.
         conn.execute("""
             CREATE TABLE IF NOT EXISTS regimen_groups (
                 singleton INTEGER PRIMARY KEY DEFAULT 1
