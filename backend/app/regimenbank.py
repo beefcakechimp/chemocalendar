@@ -1,37 +1,19 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import calendar as cal
 import datetime as dt
-import os
 import re
-import sqlite3
-import sys
-import time
 from dataclasses import dataclass, asdict, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ---------------- config ----------------
-SCHEMA_VERSION = 3
-DEFAULT_DB = Path(__file__).resolve().parent / "regimenbank.db"
-ROUTES = ["IV", "PO", "SQ", "IM", "IT"]
 
-def _supports_ansi() -> bool:
-    return sys.stdout.isatty() and (
-        os.name != "nt" or "WT_SESSION" in os.environ or "TERM" in os.environ
-    )
-
-def _italic(s: str) -> str:
-    return f"\x1b[3m{s}\x1b[0m" if _supports_ansi() else s
-
-# ADDED: Missing TherapyOption dataclass required by pg_bank.py
 @dataclass
 class TherapyOption:
     dose: str
     duration: str
     total_doses: Optional[int] = None
+
 
 @dataclass
 class Chemotherapy:
@@ -41,7 +23,6 @@ class Chemotherapy:
     frequency: str
     duration: str
     total_doses: Optional[int] = None
-    # ADDED: Missing options list required by pg_bank.py
     options: List[TherapyOption] = field(default_factory=list)
 
     @staticmethod
@@ -49,14 +30,16 @@ class Chemotherapy:
         opts_data = d.get("options", [])
         parsed_opts = [
             TherapyOption(
-                dose=o.get("dose", ""), 
-                duration=o.get("duration", ""), 
-                total_doses=o.get("total_doses")
-            ) for o in opts_data
+                dose=o.get("dose", ""),
+                duration=o.get("duration", ""),
+                total_doses=o.get("total_doses"),
+            )
+            for o in opts_data
         ]
         return Chemotherapy(
             d["name"], d["route"], d["dose"], d["frequency"], d["duration"], d.get("total_doses"), parsed_opts
         )
+
 
 @dataclass
 class Regimen:
@@ -87,140 +70,54 @@ class Regimen:
                 return
         self.therapies.append(c)
 
-class RegimenBank:
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.execute("PRAGMA busy_timeout = 5000")
-        self._init_schema()
-
-    def _init_schema(self) -> None:
-        cur = self.conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS regimens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
-                disease_state TEXT, on_study INTEGER NOT NULL DEFAULT 0,
-                notes TEXT, updated_at TEXT NOT NULL
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS therapies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, regimen_id INTEGER NOT NULL,
-                name TEXT NOT NULL, route TEXT NOT NULL, dose TEXT NOT NULL,
-                frequency TEXT NOT NULL, duration TEXT NOT NULL, total_doses INTEGER,
-                options TEXT NOT NULL DEFAULT '[]',
-                FOREIGN KEY (regimen_id) REFERENCES regimens(id) ON DELETE CASCADE
-            )
-        """)
-        cur.execute("PRAGMA table_info(regimens)")
-        rcols = [row["name"] for row in cur.fetchall()]
-        if "on_study" not in rcols:
-            cur.execute("ALTER TABLE regimens ADD COLUMN on_study INTEGER NOT NULL DEFAULT 0")
-        cur.execute("PRAGMA table_info(therapies)")
-        cols = [row["name"] for row in cur.fetchall()]
-        if "total_doses" not in cols:
-            cur.execute("ALTER TABLE therapies ADD COLUMN total_doses INTEGER")
-        if "options" not in cols:
-            cur.execute("ALTER TABLE therapies ADD COLUMN options TEXT NOT NULL DEFAULT '[]'")
-        self.conn.commit()
-
-    def list_regimens(self) -> List[str]:
-        cur = self.conn.execute("SELECT name FROM regimens ORDER BY name COLLATE NOCASE")
-        return [row["name"] for row in cur.fetchall()]
-
-    def get_regimen(self, name: str) -> Optional[Regimen]:
-        name = name.strip()
-        cur = self.conn.execute(
-            "SELECT id, name, disease_state, notes, on_study FROM regimens WHERE name = ?", (name,)
-        )
-        row = cur.fetchone()
-        if not row: return None
-
-        reg_id = row["id"]
-        import json as _json
-        cur_t = self.conn.execute(
-            "SELECT name, route, dose, frequency, duration, total_doses, options FROM therapies WHERE regimen_id = ? ORDER BY id",
-            (reg_id,)
-        )
-        therapies = []
-        for trow in cur_t.fetchall():
-            raw_opts = trow["options"] or "[]"
-            parsed_opts = [
-                TherapyOption(dose=o.get("dose", ""), duration=o.get("duration", ""), total_doses=o.get("total_doses"))
-                for o in _json.loads(raw_opts)
-            ]
-            therapies.append(Chemotherapy(trow["name"], trow["route"], trow["dose"], trow["frequency"], trow["duration"], trow["total_doses"], parsed_opts))
-
-        return Regimen(
-            name=row["name"], disease_state=row["disease_state"], on_study=bool(row["on_study"]),
-            notes=row["notes"], therapies=therapies,
-        )
-
-    def upsert_regimen(self, reg: Regimen) -> None:
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        with self.conn:
-            cur = self.conn.execute("SELECT id FROM regimens WHERE name = ?", (reg.name,))
-            row = cur.fetchone()
-            if row:
-                reg_id = row["id"]
-                self.conn.execute(
-                    "UPDATE regimens SET disease_state = ?, notes = ?, on_study = ?, updated_at = ? WHERE id = ?",
-                    (reg.disease_state, reg.notes, int(reg.on_study), now, reg_id),
-                )
-                self.conn.execute("DELETE FROM therapies WHERE regimen_id = ?", (reg_id,))
-            else:
-                self.conn.execute(
-                    "INSERT INTO regimens(name, disease_state, notes, on_study, updated_at) VALUES(?, ?, ?, ?, ?)",
-                    (reg.name, reg.disease_state, reg.notes, int(reg.on_study), now),
-                )
-                reg_id = self.conn.execute("SELECT id FROM regimens WHERE name = ?", (reg.name,)).fetchone()["id"]
-
-            import json as _json
-            for t in reg.therapies:
-                total_doses = t.total_doses if t.total_doses is not None else len(parse_day_spec(t.duration))
-                opts_json = _json.dumps([{"dose": o.dose, "duration": o.duration, "total_doses": o.total_doses} for o in t.options])
-                self.conn.execute(
-                    "INSERT INTO therapies(regimen_id, name, route, dose, frequency, duration, total_doses, options) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                    (reg_id, t.name, t.route, t.dose, t.frequency, t.duration, total_doses, opts_json),
-                )
-
-    def delete_regimen(self, name: str) -> bool:
-        with self.conn:
-            cur = self.conn.execute("DELETE FROM regimens WHERE name = ?", (name.strip(),))
-            return cur.rowcount > 0
-
-    def save_as(self, reg: Regimen, new_name: str) -> None:
-        r2 = replace(reg, name=new_name)
-        self.upsert_regimen(r2)
-
-    def close(self) -> None:
-        try: self.conn.close()
-        except Exception: pass
 
 def parse_day_spec(day_spec: str) -> List[int]:
-    if not day_spec: return []
+    if not day_spec:
+        return []
     s = day_spec.replace("–", "-").strip().lower()
     s = re.sub(r"^days?\s*[:\-]?\s*", "", s)
-    if not s: return []
+    if not s:
+        return []
 
     tokens = re.split(r"[,\s]+", s)
     out: List[int] = []
 
     for tok in tokens:
-        if not tok: continue
+        if not tok:
+            continue
         if "-" in tok:
             try:
                 a_str, b_str = tok.split("-", 1)
                 a, b = int(a_str), int(b_str)
-                if a <= b: out.extend(range(a, b + 1))
-            except ValueError: continue
+                if a <= b:
+                    out.extend(range(a, b + 1))
+            except ValueError:
+                continue
         else:
-            try: out.append(int(tok))
-            except ValueError: continue
+            try:
+                out.append(int(tok))
+            except ValueError:
+                continue
 
     return sorted(set(d for d in out if d >= 1))
+
+
+def _doses_per_day(frequency: str) -> int:
+    """Return the number of doses given per active day based on frequency abbreviation."""
+    if not frequency:
+        return 1
+    f = frequency.strip().lower()
+    # Four times daily
+    if re.search(r"\bqid\b|q\.?6\.?h\b|four\s+times\s+daily|4\s*x\s*(daily|day)", f):
+        return 4
+    # Three times daily
+    if re.search(r"\btid\b|q\.?8\.?h\b|three\s+times\s+daily|3\s*x\s*(daily|day)", f):
+        return 3
+    # Twice daily
+    if re.search(r"\bbid\b|q\.?12\.?h\b|twice\s+daily|twice\s+a\s+day|2\s*x\s*(daily|day)", f):
+        return 2
+    return 1
+
 
 def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
     max_day = cycle_len
@@ -229,7 +126,8 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
         dlist = [d for d in parse_day_spec(t.duration) if d <= cycle_len]
         if dlist:
             max_day = max(max_day, max(dlist))
-            for d in dlist: by_day.setdefault(d, []).append(t.name)
+            for d in dlist:
+                by_day.setdefault(d, []).append(t.name)
 
     first_sun = start - dt.timedelta(days=(start.weekday() + 1) % 7)
     last_needed = start + dt.timedelta(days=max_day - 1)
@@ -257,10 +155,12 @@ def compute_calendar_grid(reg: Regimen, start: dt.date, cycle_len: int):
         grid.append(week)
     return first_sun, last_sat, max_day, grid
 
+
 def _spell_route(route: str) -> str:
     r = route.strip().upper()
     mapping = {"PO": "by mouth", "IV": "intravenously", "SQ": "Inject SubQ", "IT": "Given during lumbar puncture"}
     return mapping.get(r, route)
+
 
 def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path: Path, cycle_label: str, note: Optional[str] = None) -> bool:
     try:
@@ -270,7 +170,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
         from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
-    except Exception: return False
+    except Exception:
+        return False
 
     first_sun, last_sat, _, grid = compute_calendar_grid(reg, start, cycle_len)
     months = cal.month_name[first_sun.month]
@@ -283,7 +184,7 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     style.font.name = 'Calibri'
     style._element.rPr.rFonts.set(qn('w:ascii'), 'Calibri')
     style._element.rPr.rFonts.set(qn('w:hAnsi'), 'Calibri')
-    style.font.size = Pt(12) 
+    style.font.size = Pt(12)
     pf = style.paragraph_format
     pf.space_before = Pt(0)
     pf.space_after = Pt(0)
@@ -294,7 +195,6 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     sec.page_width, sec.page_height = Inches(11), Inches(8.5)
     sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Inches(0.5)
 
-    # 🛑 THE LOGO FIX: Put the Name and Logo in the MAIN document body, not the header!
     htbl = doc.add_table(rows=1, cols=2)
     htbl.alignment = WD_TABLE_ALIGNMENT.CENTER
 
@@ -317,21 +217,22 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     r_dob.font.size = Pt(12)
 
     if left_cell.paragraphs and left_cell.paragraphs[0].text == "":
-        try: left_cell._element.remove(left_cell.paragraphs[0]._element)
-        except Exception: pass
+        try:
+            left_cell._element.remove(left_cell.paragraphs[0]._element)
+        except Exception:
+            pass
 
     right_cell = htbl.cell(0, 1)
     right_p = right_cell.paragraphs[0]
     right_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    # Search for the logo in every possible Docker/Local location
     logo_path = None
     possible_paths = [
-        Path(__file__).resolve().parent.parent / "ucm.png", # Local backend folder
-        Path(__file__).resolve().parent / "ucm.png",        # Local backend/app folder
-        Path.cwd() / "ucm.png",                             # Docker /app folder
-        Path.cwd() / "backend" / "ucm.png",                 # Workspace root
-        Path("/app/ucm.png")                                # Hardcoded Docker fallback
+        Path(__file__).resolve().parent.parent / "ucm.png",
+        Path(__file__).resolve().parent / "ucm.png",
+        Path.cwd() / "ucm.png",
+        Path.cwd() / "backend" / "ucm.png",
+        Path("/app/ucm.png"),
     ]
     for p in possible_paths:
         if p.exists():
@@ -343,8 +244,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
             right_p.add_run().add_picture(str(logo_path), height=Inches(0.76))
         except Exception as e:
             print(f"[WARN] Could not insert logo: {e}")
-            
-    doc.add_paragraph() # Add visual spacer after header
+
+    doc.add_paragraph()
 
     rows = len(grid) + 2
     cols = 7
@@ -455,7 +356,8 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
                     p_lab.paragraph_format.space_after = Pt(0)
                     rl = p_lab.add_run(lab)
                     rl.font.size = Pt(14)
-                    if lab.lower() != "rest": rl.bold = True
+                    if lab.lower() != "rest":
+                        rl.bold = True
 
     tbl_pr = table._element.tblPr
     borders = OxmlElement("w:tblBorders")
@@ -480,7 +382,7 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
             total_doses = t.total_doses
         else:
             day_list = parse_day_spec(t.duration)
-            total_doses = len(day_list)
+            total_doses = len(day_list) * _doses_per_day(t.frequency)
 
         dose_text = t.dose.strip()
         sentence = f"{t.name}: {verb} {dose_text} {route_phrase} {freq_text} on {dur_text} (total {total_doses} dose{'s' if total_doses != 1 else ''})."

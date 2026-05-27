@@ -5,7 +5,7 @@ import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 from psycopg_pool import ConnectionPool
-from .regimenbank import Chemotherapy, Regimen, TherapyOption, parse_day_spec
+from .regimenbank import Chemotherapy, Regimen, TherapyOption, _doses_per_day, parse_day_spec
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class PgBank:
 
             conn.execute("DELETE FROM therapies WHERE regimen_id = %s", (reg_id,))
             for t in reg.therapies:
-                try: auto_doses = len(parse_day_spec(t.duration))
+                try: auto_doses = len(parse_day_spec(t.duration)) * _doses_per_day(t.frequency)
                 except Exception: auto_doses = None
                 total_doses = t.total_doses if t.total_doses is not None else auto_doses
                 opts_json = json.dumps([{"dose": o.dose, "duration": o.duration, "total_doses": o.total_doses} for o in t.options])
