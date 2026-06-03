@@ -12,6 +12,7 @@ pnpm-debug.log*
 # Next.js env/build artifacts
 .next/cache/
 .vercel/
+*.tsbuildinfo
 
 # ---- Python / venv ----
 .venv/
