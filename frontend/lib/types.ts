@@ -24,6 +24,13 @@ export interface Regimen {
   therapies: Chemo[];
 }
 
+export interface RegimenMeta {
+  name: string;
+  disease_state?: string | null;
+  on_study: boolean;
+  updated_at?: string | null;
+}
+
 export interface CalendarCell {
   date: string;
   cycle_day: number | null;

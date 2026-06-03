@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from .regimenbank import Chemotherapy, Regimen, TherapyOption, export_calendar_docx
 from .pg_bank import (PgBank, close_bank, get_bank, validate_db)
-from .schemas import CalendarPreviewRequest, CalendarPreviewResponse, RegimenIn, RenameRegimenRequest
+from .schemas import CalendarPreviewRequest, CalendarPreviewResponse, RegimenIn, RenameRegimenRequest, RegimenMeta
 from .calendar_service import build_preview
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,10 @@ def health(bank: PgBank = Depends(get_bank)):
         with bank.pool.connection() as conn: conn.execute("SELECT 1")
         return {"ok": True, "db": "connected"}
     except Exception as e: raise HTTPException(status_code=503, detail=f"DB unreachable: {e}")
+
+@app.get("/regimens/meta", response_model=List[RegimenMeta])
+def list_regimens_meta(bank: PgBank = Depends(get_bank)):
+    return bank.list_regimens_meta()
 
 @app.get("/regimens/all")
 def get_all_regimens_detailed(bank: PgBank = Depends(get_bank)):
