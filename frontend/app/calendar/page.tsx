@@ -203,7 +203,7 @@ function CalendarPageInner() {
 
               <Divider sx={{ my: 2 }} />
               <Stack spacing={1}>
-                <Button variant="contained" fullWidth onClick={runPreview} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} sx={{ py: 1 }}>
+                <Button variant="contained" fullWidth onClick={() => runPreview()} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} sx={{ py: 1 }}>
                   {busy ? "Generating…" : "Generate Preview"}
                 </Button>
                 <Button variant="outlined" fullWidth onClick={runExport} disabled={exportBusy || !regimenName} startIcon={exportBusy ? <CircularProgress size={14} /> : null} sx={{ py: 1 }}>
