@@ -41,6 +41,21 @@ class PgBank:
 
         return Regimen(name=rname, disease_state=disease_state, on_study=bool(on_study), notes=notes, therapies=therapies)
 
+    def list_regimens_meta(self) -> List[dict]:
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT name, disease_state, on_study, updated_at FROM regimens ORDER BY name"
+            ).fetchall()
+        return [
+            {
+                "name": r[0],
+                "disease_state": r[1],
+                "on_study": bool(r[2]),
+                "updated_at": r[3].isoformat() if r[3] else None,
+            }
+            for r in rows
+        ]
+
     def get_all_regimens(self) -> List[Regimen]:
         with self.pool.connection() as conn:
             reg_rows = conn.execute("SELECT id, name, disease_state, notes, on_study FROM regimens ORDER BY name").fetchall()

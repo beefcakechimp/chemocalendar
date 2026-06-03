@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import useSWR, { mutate as globalMutate } from "swr";
-import { listRegimens, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
+import { listRegimensMeta, getRegimen, upsertRegimen, deleteRegimen } from "@/lib/api";
 import { Regimen, Chemo, TherapyOption } from "@/lib/types";
-import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress } from "@mui/material";
+import { sortRegimenMeta, SortBy } from "@/lib/utils";
+import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import Link from "next/link";
 
 const ROUTES = ["IV", "PO", "SQ", "IM", "IT"];
@@ -118,7 +119,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
     setSaving(true); setErr(""); setSuccess("");
     try {
       await upsertRegimen({ ...reg, name: reg.name.trim() });
-      await globalMutate("regimens");
+      await globalMutate("regimens/meta");
       setSuccess("Saved successfully.");
       setDirty(false);
       onSaved(reg.name.trim());
@@ -127,7 +128,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
   }
 
   async function handleDelete() {
-    try { await deleteRegimen(initial.name); await globalMutate("regimens"); onDeleted(); } 
+    try { await deleteRegimen(initial.name); await globalMutate("regimens/meta"); onDeleted(); }
     catch (e: any) { setErr(e?.message || "Delete failed."); }
   }
 
@@ -256,9 +257,10 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
 }
 
 export default function RegimensPage() {
-  const { data: names, error, isLoading } = useSWR("regimens", listRegimens);
+  const { data: metas, error, isLoading } = useSWR("regimens/meta", listRegimensMeta);
   const [selected, setSelected] = React.useState<string | "__new__">("__new__");
   const [q, setQ] = React.useState("");
+  const [sortBy, setSortBy] = React.useState<SortBy>("status");
 
   const { data: selectedRegimen, isLoading: regLoading } = useSWR<Regimen>(
     selected && selected !== "__new__" ? ["regimen", selected] : null,
@@ -274,10 +276,10 @@ export default function RegimensPage() {
   }, [isLoading]);
 
   const filtered = React.useMemo(() => {
-    const xs = names || [];
+    const sorted = sortRegimenMeta(metas || [], sortBy);
     const qq = q.trim().toLowerCase();
-    return qq ? xs.filter((n) => n.toLowerCase().includes(qq)) : xs;
-  }, [names, q]);
+    return qq ? sorted.filter((m) => m.name.toLowerCase().includes(qq) || (m.disease_state || "").toLowerCase().includes(qq)) : sorted;
+  }, [metas, q, sortBy]);
 
   const editorKey = selected;
   const editorInitial = selected === "__new__" ? EMPTY_REGIMEN : (selectedRegimen ?? null);
@@ -290,13 +292,27 @@ export default function RegimensPage() {
       </Box>
 
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
-        <Card variant="outlined" sx={{ width: { xs: "100%", md: 260 }, flexShrink: 0 }}>
+        <Card variant="outlined" sx={{ width: { xs: "100%", md: 280 }, flexShrink: 0 }}>
           <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
             <Box sx={{ px: 1.5, pt: 1.5, pb: 1 }}>
               <TextField fullWidth size="small" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box></InputAdornment> }} />
             </Box>
             <Box sx={{ px: 1.5, pb: 0.75 }}>
               <Button fullWidth size="small" variant={selected === "__new__" ? "contained" : "outlined"} onClick={() => setSelected("__new__")} sx={{ justifyContent: "flex-start", fontSize: "0.8rem", py: 0.75 }}>+ New regimen</Button>
+            </Box>
+            <Box sx={{ px: 1.5, pb: 1 }}>
+              <ToggleButtonGroup
+                value={sortBy}
+                exclusive
+                onChange={(_, v) => { if (v) setSortBy(v); }}
+                size="small"
+                fullWidth
+                sx={{ "& .MuiToggleButton-root": { flex: 1, px: 0.5, py: 0.3, fontSize: "0.65rem", textTransform: "none", border: "1px solid #e2e8f0", lineHeight: 1.3, "&.Mui-selected": { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" } } }}
+              >
+                <ToggleButton value="status">Status</ToggleButton>
+                <ToggleButton value="date">Recent</ToggleButton>
+                <ToggleButton value="name">A–Z</ToggleButton>
+              </ToggleButtonGroup>
             </Box>
             <Divider />
 
@@ -315,10 +331,13 @@ export default function RegimensPage() {
 
             <Box sx={{ maxHeight: 500, overflowY: "auto" }}>
               <List disablePadding dense sx={{ px: 1, py: 0.75 }}>
-                {filtered.map((n) => (
-                  <ListItemButton key={n} selected={selected === n} onClick={() => setSelected(n)} sx={{ borderRadius: "5px", mb: 0.25, px: 1.5, py: 0.875, "&.Mui-selected": { background: "#eff6ff", "& .rn": { color: "#0f4c81", fontWeight: 700 } } }}>
-                    <Box>
-                      <Typography className="rn" sx={{ fontSize: "0.875rem", fontWeight: 500, color: "#1e293b" }} noWrap>{n}</Typography>
+                {filtered.map((m) => (
+                  <ListItemButton key={m.name} selected={selected === m.name} onClick={() => setSelected(m.name)} sx={{ borderRadius: "5px", mb: 0.25, px: 1.5, py: 0.875, "&.Mui-selected": { background: "#eff6ff", "& .rn": { color: "#0f4c81", fontWeight: 700 } } }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography className="rn" sx={{ fontSize: "0.875rem", fontWeight: 500, color: "#1e293b" }} noWrap>{m.name}</Typography>
+                      {m.disease_state && (
+                        <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }} noWrap>{m.disease_state} · {m.on_study ? "On Study" : "Off Protocol"}</Typography>
+                      )}
                     </Box>
                   </ListItemButton>
                 ))}
@@ -328,7 +347,7 @@ export default function RegimensPage() {
               </List>
             </Box>
             <Box sx={{ px: 2, py: 1, borderTop: "1px solid #e2e8f0" }}>
-              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>{names?.length ?? 0} regimen{(names?.length ?? 0) !== 1 ? "s" : ""} total</Typography>
+              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8" }}>{metas?.length ?? 0} regimen{(metas?.length ?? 0) !== 1 ? "s" : ""} total</Typography>
             </Box>
           </CardContent>
         </Card>
@@ -337,7 +356,7 @@ export default function RegimensPage() {
           {regLoading && selected !== "__new__" ? (
             <Card variant="outlined"><CardContent sx={{ p: 2.5 }}>{[...Array(4)].map((_, i) => <Box key={i} sx={{ height: i === 0 ? 28 : 44, mb: 1, borderRadius: "5px", background: "#f1f5f9" }} />)}</CardContent></Card>
           ) : editorInitial !== null ? (
-            <RegimenEditor key={editorKey} initial={editorInitial} isNew={selected === "__new__"} onSaved={(name) => { setSelected(name); globalMutate(["regimen", name]); }} onDeleted={() => setSelected(names?.find((n) => n !== selected) ?? "__new__")} />
+            <RegimenEditor key={editorKey} initial={editorInitial} isNew={selected === "__new__"} onSaved={(name) => { setSelected(name); globalMutate(["regimen", name]); }} onDeleted={() => setSelected(metas?.find((m) => m.name !== selected)?.name ?? "__new__")} />
           ) : null}
         </Box>
       </Stack>

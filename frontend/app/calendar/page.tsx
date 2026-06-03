@@ -4,8 +4,9 @@ import * as React from "react";
 import useSWR from "swr";
 import dayjs from "dayjs";
 import { useSearchParams } from "next/navigation";
-import { listRegimens, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
+import { listRegimensMeta, getRegimen, previewCalendar, exportCalendarDocx } from "@/lib/api";
 import { Regimen, CalendarPreviewResponse, Chemo } from "@/lib/types";
+import { sortRegimenMeta } from "@/lib/utils";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider, FormControl,
   InputLabel, MenuItem, Select, Stack, TextField, Tooltip, Typography, RadioGroup, FormControlLabel, Radio
@@ -33,7 +34,8 @@ function CalendarPageInner() {
   const params = useSearchParams();
   const preselected = params.get("regimen");
 
-  const { data: names, isLoading: namesLoading } = useSWR("regimens", listRegimens);
+  const { data: allMeta, isLoading: namesLoading } = useSWR("regimens/meta", listRegimensMeta);
+  const names = React.useMemo(() => sortRegimenMeta(allMeta || [], "status").map((m) => m.name), [allMeta]);
   const [regimenName, setRegimenName] = React.useState<string>(preselected || "");
   const { data: regimen } = useSWR<Regimen>(regimenName ? ["regimen", regimenName] : null, () => getRegimen(regimenName));
 
@@ -46,6 +48,7 @@ function CalendarPageInner() {
   const [titleDirty, setTitleDirty] = React.useState(false);
   
   const [customTherapies, setCustomTherapies] = React.useState<Chemo[]>([]);
+  const autoPreviewedRef = React.useRef<string>("");
 
   React.useEffect(() => {
     if (!regimenName && names && names.length) {
@@ -58,16 +61,22 @@ function CalendarPageInner() {
     if (regimen?.name && !titleDirty) setTitle(regimen.name);
   }, [regimen?.name, titleDirty]);
 
-  // FIX: Tie the therapy building to regimenName so SWR background refresh doesn't wipe out your selected radio buttons
   React.useEffect(() => {
     if (regimen?.therapies) {
-      setCustomTherapies(regimen.therapies.map(t => {
+      const therapies = regimen.therapies.map(t => {
         const firstOpt = t.options && t.options.length > 0 ? t.options[0] : { dose: t.dose, duration: t.duration, total_doses: t.total_doses };
         return { ...t, dose: firstOpt.dose, duration: firstOpt.duration, total_doses: firstOpt.total_doses };
-      }));
+      });
+      setCustomTherapies(therapies);
+      // Auto-preview only on the first load of a regimen's therapies
+      if (autoPreviewedRef.current !== regimenName) {
+        autoPreviewedRef.current = regimenName;
+        runPreview(therapies);
+      }
     } else {
       setCustomTherapies([]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regimenName, regimen?.therapies]);
 
   const [preview, setPreview] = React.useState<CalendarPreviewResponse | null>(null);
@@ -75,7 +84,7 @@ function CalendarPageInner() {
   const [exportBusy, setExportBusy] = React.useState(false);
   const [err, setErr] = React.useState<string>("");
 
-  const buildRequest = () => ({
+  const buildRequest = (therapiesParam?: Chemo[]) => ({
     regimen_name: regimenName,
     title_override: title.trim() || null,
     start_date: startDate,
@@ -83,14 +92,14 @@ function CalendarPageInner() {
     phase,
     cycle_num: phase === "Cycle" ? cycleNum : null,
     note: note.trim() || null,
-    therapies_override: customTherapies, 
+    therapies_override: therapiesParam ?? customTherapies,
   });
 
-  async function runPreview() {
+  async function runPreview(therapiesParam?: Chemo[]) {
     if (!regimenName) return;
     setErr(""); setBusy(true);
-    try { setPreview(await previewCalendar(buildRequest())); } 
-    catch (e: any) { setErr(e?.message || "Preview failed"); setPreview(null); } 
+    try { setPreview(await previewCalendar(buildRequest(therapiesParam))); }
+    catch (e: any) { setErr(e?.message || "Preview failed"); setPreview(null); }
     finally { setBusy(false); }
   }
 
@@ -100,14 +109,9 @@ function CalendarPageInner() {
     try {
       const { blob, filename } = await exportCalendarDocx(buildRequest());
       downloadBlob(blob, filename);
-    } catch (e: any) { setErr(e?.message || "Export failed"); } 
+    } catch (e: any) { setErr(e?.message || "Export failed"); }
     finally { setExportBusy(false); }
   }
-
-  React.useEffect(() => {
-    if (regimenName) runPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regimenName]);
 
   return (
     <Box>
@@ -199,7 +203,7 @@ function CalendarPageInner() {
 
               <Divider sx={{ my: 2 }} />
               <Stack spacing={1}>
-                <Button variant="contained" fullWidth onClick={runPreview} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} sx={{ py: 1 }}>
+                <Button variant="contained" fullWidth onClick={() => runPreview()} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} sx={{ py: 1 }}>
                   {busy ? "Generating…" : "Generate Preview"}
                 </Button>
                 <Button variant="outlined" fullWidth onClick={runExport} disabled={exportBusy || !regimenName} startIcon={exportBusy ? <CircularProgress size={14} /> : null} sx={{ py: 1 }}>
@@ -233,7 +237,7 @@ function CalendarPageInner() {
                 {!preview && !busy && (
                   <Box sx={{ textAlign: "center", py: 8 }}>
                     <Box sx={{ fontSize: "2.5rem", mb: 1.5, opacity: 0.2 }}>◫</Box>
-                    <Typography sx={{ color: "#94a3b8", fontSize: "0.9rem" }}>{regimenName ? "Click 'Generate Preview' to see the calendar" : "Select a regimen to begin"}</Typography>
+                    <Typography sx={{ color: "#94a3b8", fontSize: "0.9rem" }}>{regimenName ? "Loading calendar…" : "Select a regimen to begin"}</Typography>
                   </Box>
                 )}
                 {busy && (

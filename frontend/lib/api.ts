@@ -1,4 +1,4 @@
-import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen } from "@/lib/types";
+import { CalendarPreviewRequest, CalendarPreviewResponse, Regimen, RegimenMeta } from "@/lib/types";
 
 const API_BASE = "/api";
 
@@ -46,6 +46,10 @@ async function apiFetch<T>(path: string, init?: RequestInit, retries = 3): Promi
 
 export function listRegimens(): Promise<string[]> {
   return apiFetch<string[]>("/regimens");
+}
+
+export function listRegimensMeta(): Promise<RegimenMeta[]> {
+  return apiFetch<RegimenMeta[]>("/regimens/meta");
 }
 
 export function getRegimen(name: string): Promise<Regimen> {

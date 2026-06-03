@@ -27,6 +27,12 @@ class RenameRegimenRequest(BaseModel):
     old_name: str
     new_name: str
 
+class RegimenMeta(BaseModel):
+    name: str
+    disease_state: Optional[str] = None
+    on_study: bool = False
+    updated_at: Optional[str] = None
+
 class TherapyOverrideIn(BaseModel):
     name: str
     route: str

@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import useSWR from "swr";
-import { listRegimens, getRegimen } from "@/lib/api";
-import { Regimen } from "@/lib/types";
+import { listRegimensMeta } from "@/lib/api";
+import { RegimenMeta } from "@/lib/types";
+import { sortRegimenMeta, SortBy } from "@/lib/utils";
 import {
   Box,
   Card,
@@ -17,6 +18,8 @@ import {
   InputAdornment,
   Skeleton,
   Alert,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import Link from "next/link";
 
@@ -49,12 +52,11 @@ function StatCard({ label, value, sub, color = "#0f4c81" }: { label: string; val
   );
 }
 
-function RegimenCard({ name, onClick }: { name: string; onClick?: () => void }) {
-  const { data: reg } = useSWR<Regimen>(["regimen", name], () => getRegimen(name));
+function RegimenCard({ meta }: { meta: RegimenMeta }) {
   return (
     <ListItemButton
       component={Link}
-      href={`/calendar?regimen=${encodeURIComponent(name)}`}
+      href={`/calendar?regimen=${encodeURIComponent(meta.name)}`}
       sx={{
         borderRadius: "6px",
         mb: 0.25,
@@ -71,26 +73,25 @@ function RegimenCard({ name, onClick }: { name: string; onClick?: () => void }) 
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25 }}>
           <Typography sx={{ fontWeight: 600, fontSize: "0.875rem", color: "#1e293b" }} noWrap>
-            {name}
+            {meta.name}
           </Typography>
-          {reg && (
-            <Chip
-              label={reg.on_study ? "On Study" : "Off Protocol"}
-              size="small"
-              sx={{
-                height: 18,
-                fontSize: "0.65rem",
-                fontWeight: 600,
-                background: reg.on_study ? "#dbeafe" : "#f0fdf4",
-                color: reg.on_study ? "#1d4ed8" : "#15803d",
-                border: "none",
-              }}
-            />
-          )}
+          <Chip
+            label={meta.on_study ? "On Study" : "Off Protocol"}
+            size="small"
+            sx={{
+              height: 18,
+              fontSize: "0.65rem",
+              fontWeight: 600,
+              background: meta.on_study ? "#dbeafe" : "#f0fdf4",
+              color: meta.on_study ? "#1d4ed8" : "#15803d",
+              border: "none",
+              flexShrink: 0,
+            }}
+          />
         </Box>
-        {reg?.disease_state && (
+        {meta.disease_state && (
           <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }} noWrap>
-            {reg.disease_state}
+            {meta.disease_state}
           </Typography>
         )}
       </Box>
@@ -100,17 +101,18 @@ function RegimenCard({ name, onClick }: { name: string; onClick?: () => void }) 
 }
 
 export default function DashboardPage() {
-  const { data: names, error, isLoading } = useSWR("regimens", listRegimens);
+  const { data: metas, error, isLoading } = useSWR("regimens/meta", listRegimensMeta);
   const [q, setQ] = React.useState("");
+  const [sortBy, setSortBy] = React.useState<SortBy>("status");
 
   const filtered = React.useMemo(() => {
-    const xs = names || [];
+    const sorted = sortRegimenMeta(metas || [], sortBy);
     const qq = q.trim().toLowerCase();
-    if (!qq) return xs;
-    return xs.filter((n) => n.toLowerCase().includes(qq));
-  }, [names, q]);
+    if (!qq) return sorted;
+    return sorted.filter((m) => m.name.toLowerCase().includes(qq) || (m.disease_state || "").toLowerCase().includes(qq));
+  }, [metas, q, sortBy]);
 
-  const totalCount = names?.length ?? 0;
+  const totalCount = metas?.length ?? 0;
 
   return (
     <Box>
@@ -237,29 +239,45 @@ export default function DashboardPage() {
       <Card variant="outlined">
         <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
           {/* Header */}
-          <Box sx={{ px: 2.5, pt: 2.25, pb: 1.5, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
-            <Box>
-              <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", color: "#1e293b" }}>
-                Regimen Library
-              </Typography>
-              <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
-                Click any regimen to open in the calendar generator
-              </Typography>
+          <Box sx={{ px: 2.5, pt: 2.25, pb: 1.5, borderBottom: "1px solid #e2e8f0" }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.25 }}>
+              <Box>
+                <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", color: "#1e293b" }}>
+                  Regimen Library
+                </Typography>
+                <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
+                  Click any regimen to open in the calendar generator
+                </Typography>
+              </Box>
+              <TextField
+                placeholder="Search regimens…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                size="small"
+                sx={{ width: 220 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box>
+                    </InputAdornment>
+                  ),
+                }}
+              />
             </Box>
-            <TextField
-              placeholder="Search regimens…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              size="small"
-              sx={{ width: 220 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box>
-                  </InputAdornment>
-                ),
-              }}
-            />
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Sort:</Typography>
+              <ToggleButtonGroup
+                value={sortBy}
+                exclusive
+                onChange={(_, v) => { if (v) setSortBy(v); }}
+                size="small"
+                sx={{ "& .MuiToggleButton-root": { px: 1.25, py: 0.35, fontSize: "0.72rem", textTransform: "none", border: "1px solid #e2e8f0", "&.Mui-selected": { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" } } }}
+              >
+                <ToggleButton value="status">Status & Disease</ToggleButton>
+                <ToggleButton value="date">Recently Updated</ToggleButton>
+                <ToggleButton value="name">Name (A–Z)</ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
           </Box>
 
           {/* List */}
@@ -292,8 +310,8 @@ export default function DashboardPage() {
                 )}
               </Box>
             )}
-            {!isLoading && !error && filtered.map((n) => (
-              <RegimenCard key={n} name={n} />
+            {!isLoading && !error && filtered.map((m) => (
+              <RegimenCard key={m.name} meta={m} />
             ))}
           </Box>
         </CardContent>
