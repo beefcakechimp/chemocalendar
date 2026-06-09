@@ -273,7 +273,7 @@ export default function DashboardPage() {
                 size="small"
                 sx={{ "& .MuiToggleButton-root": { px: 1.25, py: 0.35, fontSize: "0.72rem", textTransform: "none", border: "1px solid #e2e8f0", "&.Mui-selected": { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" } } }}
               >
-                <ToggleButton value="status">Status & Disease</ToggleButton>
+                <ToggleButton value="status">Disease & Status</ToggleButton>
                 <ToggleButton value="date">Recently Updated</ToggleButton>
                 <ToggleButton value="name">Name (A–Z)</ToggleButton>
               </ToggleButtonGroup>

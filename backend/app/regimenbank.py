@@ -252,6 +252,40 @@ def _spell_route(route: str) -> str:
     mapping = {"PO": "by mouth", "IV": "intravenously", "SQ": "Inject SubQ", "IT": "Given during lumbar puncture"}
     return mapping.get(r, route)
 
+def _route_phrase_doc(route: str) -> str:
+    """Route phrasing used in the calendar's instruction bullets."""
+    r = route.strip().upper()
+    mapping = {"PO": "by mouth", "IV": "IV", "SQ": "subcutaneously", "IM": "intramuscularly", "IT": "intrathecally"}
+    return mapping.get(r, route)
+
+def _format_day_phrase(duration: str) -> str:
+    """Turn a day spec (e.g. "Days 1-7" or "1, 8, 15") into prose like
+    "Day 1 through and including Day 7" or "Days 1, 8, and 15"."""
+    days = parse_day_spec(duration)
+    if not days:
+        return (duration or "").strip()
+
+    # Group consecutive days into runs.
+    runs: List[Tuple[int, int]] = []
+    start = prev = days[0]
+    for d in days[1:]:
+        if d == prev + 1:
+            prev = d
+        else:
+            runs.append((start, prev))
+            start = prev = d
+    runs.append((start, prev))
+
+    # A single contiguous range reads "Day X through and including Day Y".
+    if len(runs) == 1:
+        a, b = runs[0]
+        return f"Day {a}" if a == b else f"Day {a} through and including Day {b}"
+
+    # Mixed/non-contiguous days: list them out.
+    parts = [str(a) if a == b else f"{a} through and including {b}" for a, b in runs]
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + ", and " + parts[-1]
+    return f"Days {joined}"
+
 def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path: Path, cycle_label: str, note: Optional[str] = None) -> bool:
     try:
         from docx import Document
@@ -461,21 +495,36 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     doc.add_paragraph()
 
     for t in reg.therapies:
-        route_phrase = _spell_route(t.route)
-        verb = "Take" if t.route.strip().upper() == "PO" else "Given"
+        route = t.route.strip().upper()
+        is_iv = route == "IV"
+        verb = "Take" if route == "PO" else "Given"
+        route_phrase = _route_phrase_doc(t.route)
         freq_text = t.frequency.strip()
-        dur_text = t.duration.strip()
+        days_phrase = _format_day_phrase(t.duration)
 
-        if t.total_doses is not None:
-            total_doses = t.total_doses
-        else:
-            day_list = parse_day_spec(t.duration)
-            total_doses = len(day_list)
+        # Build the instruction: "{verb} {dose} {route} {frequency} on {days}."
+        # IV chemo is administered in the hospital, so its dose is omitted here.
+        words = [verb]
+        if not is_iv and t.dose.strip():
+            words.append(t.dose.strip())
+        words.append(route_phrase)
+        if freq_text:
+            words.append(freq_text)
+        sentence = " ".join(words)
+        if days_phrase:
+            sentence += f" on {days_phrase}"
+        sentence += "."
 
-        sentence = f"{t.name}: {verb} {route_phrase} {freq_text} on {dur_text} (total {total_doses} dose{'s' if total_doses != 1 else ''})."
         p = doc.add_paragraph(style="List Bullet")
-        run = p.add_run(sentence)
-        run.font.size = Pt(12)
+        name_run = p.add_run(f"{t.name}: ")
+        name_run.bold = True
+        name_run.font.size = Pt(12)
+        body_run = p.add_run(sentence)
+        body_run.font.size = Pt(12)
+        if is_iv:
+            hosp_run = p.add_run(" Given in the hospital.")
+            hosp_run.italic = True
+            hosp_run.font.size = Pt(12)
 
     doc.save(out_path)
     return True
