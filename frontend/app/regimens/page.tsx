@@ -309,7 +309,7 @@ export default function RegimensPage() {
                 fullWidth
                 sx={{ "& .MuiToggleButton-root": { flex: 1, px: 0.5, py: 0.3, fontSize: "0.65rem", textTransform: "none", border: "1px solid #e2e8f0", lineHeight: 1.3, "&.Mui-selected": { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" } } }}
               >
-                <ToggleButton value="status">Status</ToggleButton>
+                <ToggleButton value="status">Disease</ToggleButton>
                 <ToggleButton value="date">Recent</ToggleButton>
                 <ToggleButton value="name">A–Z</ToggleButton>
               </ToggleButtonGroup>

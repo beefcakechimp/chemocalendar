@@ -5,10 +5,16 @@ export type SortBy = "status" | "name" | "date";
 export function sortRegimenMeta(metas: RegimenMeta[], sortBy: SortBy): RegimenMeta[] {
   const sorted = [...metas];
   if (sortBy === "status") {
+    // Group by disease state first, then on/off-study status, then name.
     sorted.sort((a, b) => {
+      const ad = a.disease_state || "";
+      const bd = b.disease_state || "";
+      if (ad !== bd) {
+        if (!ad) return 1; // regimens with no disease state sort last
+        if (!bd) return -1;
+        return ad.localeCompare(bd);
+      }
       if (a.on_study !== b.on_study) return a.on_study ? -1 : 1;
-      const ds = (a.disease_state || "").localeCompare(b.disease_state || "");
-      if (ds !== 0) return ds;
       return a.name.localeCompare(b.name);
     });
   } else if (sortBy === "name") {
