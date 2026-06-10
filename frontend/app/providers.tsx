@@ -3,8 +3,14 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CssBaseline, Box, Typography, Divider } from "@mui/material";
+import { CssBaseline, Box, Typography, Divider, Drawer, IconButton } from "@mui/material";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
+import SpaceDashboardRoundedIcon from "@mui/icons-material/SpaceDashboardRounded";
+import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+import MedicationRoundedIcon from "@mui/icons-material/MedicationRounded";
+import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
+import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import React from "react";
 
 const LinkBehavior = React.forwardRef<HTMLAnchorElement, any>(function LinkBehavior(props, ref) {
@@ -88,12 +94,13 @@ const theme = createTheme({
 });
 
 const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: "⊞" },
-  { href: "/calendar", label: "Calendar", icon: "◫" },
-  { href: "/regimens", label: "Regimens", icon: "≡" },
+  { href: "/", label: "Dashboard", icon: <SpaceDashboardRoundedIcon fontSize="small" /> },
+  { href: "/calendar", label: "Calendar", icon: <CalendarMonthRoundedIcon fontSize="small" /> },
+  { href: "/regimens", label: "Regimens", icon: <MedicationRoundedIcon fontSize="small" /> },
+  { href: "/guide", label: "How to Use", icon: <MenuBookRoundedIcon fontSize="small" /> },
 ];
 
-function NavLink({ href, label, icon }: { href: string; label: string; icon: string }) {
+function NavLink({ href, label, icon }: { href: string; label: string; icon: ReactNode }) {
   const pathname = usePathname();
   const active = pathname === href;
   return (
@@ -117,7 +124,10 @@ function NavLink({ href, label, icon }: { href: string; label: string; icon: str
           },
         }}
       >
-        <Box component="span" sx={{ fontSize: "1rem", opacity: 0.8, width: 18, textAlign: "center" }}>
+        <Box
+          component="span"
+          sx={{ display: "inline-flex", alignItems: "center", opacity: active ? 1 : 0.75, "& svg": { fontSize: "1.1rem" } }}
+        >
           {icon}
         </Box>
         {label}
@@ -126,12 +136,81 @@ function NavLink({ href, label, icon }: { href: string; label: string; icon: str
   );
 }
 
+function Brand() {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+      <Box
+        sx={{
+          width: 30,
+          height: 30,
+          borderRadius: "7px",
+          background: "linear-gradient(135deg, #0f4c81 0%, #1a6bb5 100%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Box component="span" sx={{ color: "white", fontSize: "0.95rem", fontWeight: 700, lineHeight: 1 }}>Rx</Box>
+      </Box>
+      <Box>
+        <Typography
+          variant="body2"
+          sx={{ fontWeight: 700, color: "#0f4c81", letterSpacing: "-0.01em", lineHeight: 1.2, fontSize: "0.9rem" }}
+        >
+          ChemoCalendar
+        </Typography>
+        <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", lineHeight: 1 }}>
+          Clinical Scheduling Tool
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
+function SidebarContent() {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <Box sx={{ px: 2.5, pt: 3, pb: 2.5 }}>
+        <Brand />
+      </Box>
+
+      <Divider />
+
+      <Box sx={{ px: 1.5, py: 1.5, flex: 1 }}>
+        <Typography sx={{ fontSize: "0.68rem", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", px: 1.5, pb: 1 }}>
+          Navigation
+        </Typography>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+          {NAV_ITEMS.map((item) => (
+            <NavLink key={item.href} {...item} />
+          ))}
+        </Box>
+      </Box>
+
+      <Box sx={{ px: 2.5, py: 2, borderTop: "1px solid #e2e8f0" }}>
+        <Typography sx={{ fontSize: "0.7rem", color: "#94a3b8", lineHeight: 1.5 }}>
+          For clinical use only.
+          <br />
+          Verify all schedules independently.
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
 export default function Providers({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+
+  // Close the mobile drawer after navigating.
+  React.useEffect(() => { setDrawerOpen(false); }, [pathname]);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ display: "flex", minHeight: "100vh" }}>
-        {/* Sidebar */}
+        {/* Desktop sidebar */}
         <Box
           component="nav"
           sx={{
@@ -139,68 +218,24 @@ export default function Providers({ children }: { children: ReactNode }) {
             flexShrink: 0,
             background: "#ffffff",
             borderRight: "1px solid #e2e8f0",
-            display: "flex",
-            flexDirection: "column",
             position: "sticky",
             top: 0,
             height: "100vh",
             overflowY: "auto",
+            display: { xs: "none", md: "block" },
           }}
         >
-          {/* Logo / Brand */}
-          <Box sx={{ px: 2.5, pt: 3, pb: 2.5 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mb: 0.25 }}>
-              <Box
-                sx={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: "7px",
-                  background: "linear-gradient(135deg, #0f4c81 0%, #1a6bb5 100%)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <Box component="span" sx={{ color: "white", fontSize: "0.95rem", fontWeight: 700, lineHeight: 1 }}>Rx</Box>
-              </Box>
-              <Box>
-                <Typography
-                  variant="body2"
-                  sx={{ fontWeight: 700, color: "#0f4c81", letterSpacing: "-0.01em", lineHeight: 1.2, fontSize: "0.9rem" }}
-                >
-                  ChemoCalendar
-                </Typography>
-                <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", lineHeight: 1 }}>
-                  Clinical Scheduling Tool
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-
-          <Divider />
-
-          {/* Nav items */}
-          <Box sx={{ px: 1.5, py: 1.5, flex: 1 }}>
-            <Typography sx={{ fontSize: "0.68rem", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", px: 1.5, pb: 1 }}>
-              Navigation
-            </Typography>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
-              {NAV_ITEMS.map((item) => (
-                <NavLink key={item.href} {...item} />
-              ))}
-            </Box>
-          </Box>
-
-          {/* Footer */}
-          <Box sx={{ px: 2.5, py: 2, borderTop: "1px solid #e2e8f0" }}>
-            <Typography sx={{ fontSize: "0.7rem", color: "#94a3b8", lineHeight: 1.5 }}>
-              For clinical use only.
-              <br />
-              Verify all schedules independently.
-            </Typography>
-          </Box>
+          <SidebarContent />
         </Box>
+
+        {/* Mobile drawer */}
+        <Drawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: 250 } }}
+        >
+          <SidebarContent />
+        </Drawer>
 
         {/* Main content */}
         <Box
@@ -220,13 +255,29 @@ export default function Providers({ children }: { children: ReactNode }) {
               borderBottom: "1px solid #e2e8f0",
               display: "flex",
               alignItems: "center",
-              px: 3,
+              gap: 1.5,
+              px: { xs: 1.5, md: 3 },
               flexShrink: 0,
+              position: "sticky",
+              top: 0,
+              zIndex: (t) => t.zIndex.appBar,
             }}
           >
+            <IconButton
+              aria-label="Open navigation"
+              onClick={() => setDrawerOpen(true)}
+              sx={{ display: { xs: "inline-flex", md: "none" }, color: "#475569" }}
+              size="small"
+            >
+              <MenuRoundedIcon />
+            </IconButton>
+            <Box sx={{ display: { xs: "block", md: "none" } }}>
+              <Brand />
+            </Box>
+            <Box sx={{ flex: 1, display: { xs: "block", sm: "none" } }} />
             <Box
               sx={{
-                display: "inline-flex",
+                display: { xs: "none", sm: "inline-flex" },
                 alignItems: "center",
                 gap: 1,
                 px: 1.5,
@@ -236,7 +287,7 @@ export default function Providers({ children }: { children: ReactNode }) {
                 borderRadius: "5px",
               }}
             >
-              <Box component="span" sx={{ fontSize: "0.75rem", color: "#92400e" }}>⚠</Box>
+              <WarningAmberRoundedIcon sx={{ fontSize: "0.95rem", color: "#92400e" }} />
               <Typography sx={{ fontSize: "0.72rem", color: "#92400e", fontWeight: 500 }}>
                 Educational / clinical support tool — always verify independently
               </Typography>
@@ -244,7 +295,7 @@ export default function Providers({ children }: { children: ReactNode }) {
           </Box>
 
           {/* Page content */}
-          <Box sx={{ flex: 1, p: 3, maxWidth: 1400, width: "100%" }}>
+          <Box sx={{ flex: 1, p: { xs: 2, md: 3 }, maxWidth: 1400, width: "100%" }}>
             {children}
           </Box>
         </Box>

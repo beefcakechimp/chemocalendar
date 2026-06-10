@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import Providers from "./providers";
 
 export const metadata = {
-  title: "Chemo Calendar",
-  description: "Regimen bank + calendar generator",
+  title: "ChemoCalendar — Treatment Cycle Scheduling",
+  description: "Chemotherapy regimen bank and patient calendar generator",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
