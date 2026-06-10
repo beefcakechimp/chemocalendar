@@ -41,6 +41,7 @@ export interface CalendarInstruction {
   name: string;
   route: string;
   text: string;
+  hospital?: boolean; // render "Given in the hospital." suffix in italics
 }
 
 export interface CalendarPreviewResponse {

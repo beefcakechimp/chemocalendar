@@ -60,6 +60,7 @@ class CalendarInstruction(BaseModel):
     name: str
     route: str
     text: str
+    hospital: bool = False  # render "Given in the hospital." suffix in italics
 
 class CalendarPreviewResponse(BaseModel):
     header: str

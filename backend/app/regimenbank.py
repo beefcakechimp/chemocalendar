@@ -252,106 +252,72 @@ def _spell_route(route: str) -> str:
     mapping = {"PO": "by mouth", "IV": "intravenously", "SQ": "Inject SubQ", "IT": "Given during lumbar puncture"}
     return mapping.get(r, route)
 
-# Common prescribing shorthand translated to plain language for patients.
-_FREQ_MAP = {
-    "qd": "once a day", "qday": "once a day", "od": "once a day",
-    "daily": "once a day", "once daily": "once a day", "every day": "once a day",
-    "bid": "twice a day", "twice daily": "twice a day",
-    "tid": "three times a day", "three times daily": "three times a day",
-    "qid": "four times a day", "four times daily": "four times a day",
-    "qhs": "at bedtime", "nightly": "at bedtime", "at bedtime": "at bedtime",
-    "qam": "every morning", "qpm": "every evening",
-    "qod": "every other day", "every other day": "every other day",
-    "qw": "once a week", "qweek": "once a week",
-    "weekly": "once a week", "once weekly": "once a week",
-}
-
-def _friendly_frequency(frequency: str) -> str:
-    """Translate prescribing shorthand (BID, QHS, q12h…) into plain language."""
-    s = (frequency or "").strip()
-    if not s:
-        return ""
-    key = re.sub(r"\s+", " ", s.lower().rstrip("."))
-    if key in _FREQ_MAP:
-        return _FREQ_MAP[key]
-    m = re.fullmatch(r"q\s*(\d+)\s*h(?:ours?)?", key)
-    if m:
-        return f"every {m.group(1)} hours"
-    return s
+# Route phrasing used in the calendar's instruction bullets.
+_ROUTE_PHRASES = {"PO": "by mouth", "IV": "IV", "SQ": "subcutaneously", "IM": "intramuscularly", "IT": "intrathecally"}
 
 def _format_day_phrase(duration: str) -> str:
-    """Turn a day spec (e.g. "Days 1-7" or "1, 8, 15") into patient-friendly
-    prose like "every day from Day 1 to Day 7" or "on Days 1, 8, and 15"."""
-    days = parse_day_spec(duration)
-    if not days:
-        raw = (duration or "").strip()
-        return f"on {raw}" if raw else ""
+    """Render the day spec the way it was entered: range tokens read
+    "Day 1 through and including Day 7", listed days read
+    "Day 4, Day 5, and Day 6"."""
+    s = (duration or "").replace("–", "-").strip()
+    s = re.sub(r"^days?\s*[:]?\s*", "", s, flags=re.IGNORECASE)
 
-    # Group consecutive days into runs.
-    runs: List[Tuple[int, int]] = []
-    start = prev = days[0]
-    for d in days[1:]:
-        if d == prev + 1:
-            prev = d
+    parts: List[str] = []
+    for tok in re.split(r"[,\s]+", s):
+        if not tok:
+            continue
+        if "-" in tok:
+            try:
+                a_str, b_str = tok.split("-", 1)
+                a, b = int(a_str), int(b_str)
+            except ValueError:
+                continue
+            parts.append(f"Day {a}" if a == b else f"Day {a} through and including Day {b}")
         else:
-            runs.append((start, prev))
-            start = prev = d
-    runs.append((start, prev))
+            try:
+                parts.append(f"Day {int(tok)}")
+            except ValueError:
+                continue
 
-    if len(runs) == 1:
-        a, b = runs[0]
-        if a == b:
-            return f"on Day {a}"
-        return f"every day from Day {a} to Day {b}"
+    if not parts:
+        return (duration or "").strip()
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return ", ".join(parts[:-1]) + ", and " + parts[-1]
 
-    # Mixed/non-contiguous days: "on Days 1, 4-6, and 15".
-    parts = [str(a) if a == b else f"{a}-{b}" for a, b in runs]
-    joined = ", ".join(parts[:-1]) + ("," if len(parts) > 2 else "") + " and " + parts[-1]
-    return f"on Days {joined}"
-
-def build_instruction_text(t: Chemotherapy) -> str:
-    """Patient-friendly instruction sentence for one therapy. Shared by the
-    DOCX export and the calendar preview API."""
+def build_instruction_parts(t: Chemotherapy) -> Tuple[str, bool]:
+    """Instruction sentence for one therapy, e.g.
+    "Take 70 mg by mouth once daily on Day 1 through and including Day 28."
+    Returns (sentence, hospital) where hospital indicates the italic
+    "Given in the hospital." suffix (IV drugs). Shared by the DOCX export
+    and the calendar preview API."""
     route = (t.route or "").strip().upper()
-    dose = (t.dose or "").strip()
-    freq = _friendly_frequency(t.frequency)
-    days = _format_day_phrase(t.duration)
+    is_iv = route == "IV"
+    verb = "Take" if route == "PO" else "Given"
+    route_phrase = _ROUTE_PHRASES.get(route, (t.route or "").strip())
+    freq = (t.frequency or "").strip()
+    days_phrase = _format_day_phrase(t.duration)
 
-    # Clinic-administered routes (IV, IT) omit the dose — staff handle it,
-    # and the number is not actionable for the patient.
-    if route == "PO":
-        words = ["Take"]
-        if dose:
-            words.append(dose)
-        words.append("by mouth")
-    elif route == "IV":
-        words = ["Given", "through an IV at the hospital"]
-    elif route == "SQ":
-        words = ["Given"]
-        if dose:
-            words.append(dose)
-        words.append("as an injection under the skin")
-    elif route == "IM":
-        words = ["Given"]
-        if dose:
-            words.append(dose)
-        words.append("as an injection into the muscle")
-    elif route == "IT":
-        words = ["Given", "into the spinal fluid during a lumbar puncture"]
-    else:
-        words = ["Given"]
-        if dose:
-            words.append(dose)
-        if route:
-            words.append(f"({(t.route or '').strip()})")
-
+    # IV chemo is administered in the hospital, so its dose is omitted here.
+    words = [verb]
+    if not is_iv and (t.dose or "").strip():
+        words.append(t.dose.strip())
+    if route_phrase:
+        words.append(route_phrase)
     if freq:
         words.append(freq)
-
     sentence = " ".join(words)
-    if days:
-        sentence += (", " if days.startswith("every") else " ") + days
-    return sentence + "."
+    if days_phrase:
+        sentence += f" on {days_phrase}"
+    sentence += "."
+    return sentence, is_iv
+
+def build_instruction_text(t: Chemotherapy) -> str:
+    """Full plain-text instruction including the hospital suffix."""
+    sentence, hospital = build_instruction_parts(t)
+    return sentence + (" Given in the hospital." if hospital else "")
 
 def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path: Path, cycle_label: str, note: Optional[str] = None) -> bool:
     try:
@@ -562,12 +528,17 @@ def export_calendar_docx(reg: Regimen, start: dt.date, cycle_len: int, out_path:
     doc.add_paragraph()
 
     for t in reg.therapies:
+        sentence, hospital = build_instruction_parts(t)
         p = doc.add_paragraph(style="List Bullet")
         name_run = p.add_run(f"{t.name}: ")
         name_run.bold = True
         name_run.font.size = Pt(12)
-        body_run = p.add_run(build_instruction_text(t))
+        body_run = p.add_run(sentence)
         body_run.font.size = Pt(12)
+        if hospital:
+            hosp_run = p.add_run(" Given in the hospital.")
+            hosp_run.italic = True
+            hosp_run.font.size = Pt(12)
 
     doc.save(out_path)
     return True
