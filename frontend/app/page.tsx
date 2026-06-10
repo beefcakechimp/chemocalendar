@@ -21,31 +21,14 @@ import {
   Button,
 } from "@mui/material";
 import Link from "next/link";
+import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+import MedicationRoundedIcon from "@mui/icons-material/MedicationRounded";
+import MenuBookRoundedIcon from "@mui/icons-material/MenuBookRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
+import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 
 const UNSPECIFIED = "Unspecified disease state";
-
-const HOW_TO_STEPS: { title: string; body: string }[] = [
-  {
-    title: "Find a regimen",
-    body: "Browse the library below — regimens are grouped by disease state. Expand a group or search by name to locate the protocol you need.",
-  },
-  {
-    title: "Open the calendar generator",
-    body: "Click a regimen to load it into the calendar generator, or use the Generate Calendar action to start and pick a regimen there.",
-  },
-  {
-    title: "Configure the cycle",
-    body: "Set the start date, cycle length, and phase or cycle number. Adjust each agent's dose and treatment days, and choose a dosing variant where alternatives are offered.",
-  },
-  {
-    title: "Preview & export",
-    body: "Generate a live preview to check the schedule, then export a print-ready DOCX calendar with per-drug administration instructions.",
-  },
-  {
-    title: "Manage regimens",
-    body: "Add, edit, rename, or remove regimens and their agents on the Regimens page so the library stays current.",
-  },
-];
 
 function ActionCard({
   href,
@@ -55,7 +38,7 @@ function ActionCard({
   primary = false,
 }: {
   href: string;
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   desc: string;
   primary?: boolean;
@@ -89,10 +72,10 @@ function ActionCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: "1.2rem",
             color: primary ? "#fff" : "#475569",
             transition: "all 0.15s",
             flexShrink: 0,
+            "& svg": { fontSize: "1.3rem" },
           }}
         >
           {icon}
@@ -105,101 +88,9 @@ function ActionCard({
             {desc}
           </Typography>
         </Box>
-        <Box sx={{ ml: 1, color: primary ? "#fff" : "#94a3b8", fontSize: "0.9rem", flexShrink: 0 }}>→</Box>
-      </CardContent>
-    </Card>
-  );
-}
-
-function InstructionsCard() {
-  const [open, setOpen] = React.useState(true);
-  return (
-    <Card variant="outlined" sx={{ mb: 3 }}>
-      <CardContent sx={{ p: 0, "&:last-child": { pb: open ? 2.5 : 0 } }}>
-        <Box
-          onClick={() => setOpen((o) => !o)}
-          sx={{
-            px: 2.5,
-            py: 2,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            cursor: "pointer",
-            borderBottom: open ? "1px solid #e2e8f0" : "none",
-            "&:hover": { background: "#f8fafc" },
-          }}
-        >
-          <Box>
-            <Typography sx={{ fontWeight: 600, fontSize: "0.95rem", color: "#1e293b" }}>
-              How to use ChemoCalendar
-            </Typography>
-            <Typography sx={{ fontSize: "0.75rem", color: "#64748b" }}>
-              Build a treatment-cycle calendar in a few steps
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              color: "#94a3b8",
-              fontSize: "0.8rem",
-              transform: open ? "rotate(90deg)" : "none",
-              transition: "transform 0.15s",
-            }}
-          >
-            ▸
-          </Box>
+        <Box sx={{ ml: 1, color: primary ? "#fff" : "#94a3b8", display: "flex", flexShrink: 0 }}>
+          <ArrowForwardRoundedIcon sx={{ fontSize: "1rem" }} />
         </Box>
-        <Collapse in={open}>
-          <Box sx={{ px: 2.5, pt: 2.25 }}>
-            <Stack spacing={1.75}>
-              {HOW_TO_STEPS.map((step, i) => (
-                <Box key={i} sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
-                  <Box
-                    sx={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: "50%",
-                      background: "#e8f2fc",
-                      color: "#0f4c81",
-                      fontSize: "0.78rem",
-                      fontWeight: 700,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      mt: 0.1,
-                    }}
-                  >
-                    {i + 1}
-                  </Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e293b", mb: 0.15 }}>
-                      {step.title}
-                    </Typography>
-                    <Typography sx={{ fontSize: "0.8rem", color: "#64748b", lineHeight: 1.5 }}>
-                      {step.body}
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-            <Box
-              sx={{
-                mt: 2.25,
-                px: 1.75,
-                py: 1.25,
-                background: "#fffbeb",
-                border: "1px solid #fde68a",
-                borderRadius: "6px",
-              }}
-            >
-              <Typography sx={{ fontSize: "0.78rem", color: "#92400e", lineHeight: 1.5 }}>
-                <Box component="span" sx={{ fontWeight: 700 }}>Clinical support tool.</Box>{" "}
-                Generated calendars are aids for scheduling only. Always verify doses, days, and
-                supportive care against the source protocol and order set before use.
-              </Typography>
-            </Box>
-          </Box>
-        </Collapse>
       </CardContent>
     </Card>
   );
@@ -243,7 +134,9 @@ function RegimenCard({ meta }: { meta: RegimenMeta }) {
           />
         </Box>
       </Box>
-      <Box sx={{ ml: 1, color: "#94a3b8", fontSize: "0.75rem" }}>→</Box>
+      <Box sx={{ ml: 1, color: "#94a3b8", display: "flex" }}>
+        <ChevronRightRoundedIcon sx={{ fontSize: "1rem" }} />
+      </Box>
     </ListItemButton>
   );
 }
@@ -280,14 +173,12 @@ function DiseaseGroup({
         <Box
           sx={{
             color: "#64748b",
-            fontSize: "0.75rem",
+            display: "flex",
             transform: expanded ? "rotate(90deg)" : "none",
             transition: "transform 0.15s",
-            width: 12,
-            textAlign: "center",
           }}
         >
-          ▸
+          <ChevronRightRoundedIcon sx={{ fontSize: "1rem" }} />
         </Box>
         <Typography
           sx={{
@@ -366,34 +257,50 @@ export default function DashboardPage() {
         <Typography sx={{ color: "#64748b", fontSize: "0.9rem" }}>
           Chemotherapy regimen scheduling and calendar generation
         </Typography>
+        <Box
+          component={Link}
+          href="/guide"
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.5,
+            mt: 0.75,
+            fontSize: "0.8rem",
+            fontWeight: 500,
+            color: "#0f4c81",
+            textDecoration: "none",
+            "&:hover": { textDecoration: "underline" },
+          }}
+        >
+          <MenuBookRoundedIcon sx={{ fontSize: "0.95rem" }} />
+          New here? Read the how-to guide
+          <ArrowForwardRoundedIcon sx={{ fontSize: "0.85rem" }} />
+        </Box>
       </Box>
 
       {/* Primary actions */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 3 }}>
         <ActionCard
           href="/calendar"
-          icon="◫"
+          icon={<CalendarMonthRoundedIcon />}
           title="Generate Calendar"
           desc="Schedule a chemo cycle and export a print-ready DOCX"
           primary
         />
         <ActionCard
           href="/regimens"
-          icon="≡"
+          icon={<MedicationRoundedIcon />}
           title="Manage Regimens"
           desc={isLoading ? "View and edit saved regimens" : `Edit the ${totalCount} saved regimen${totalCount !== 1 ? "s" : ""}`}
         />
       </Stack>
-
-      {/* How to use */}
-      <InstructionsCard />
 
       {/* Regimen browser */}
       <Card variant="outlined">
         <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
           {/* Header */}
           <Box sx={{ px: 2.5, pt: 2.25, pb: 1.5, borderBottom: "1px solid #e2e8f0" }}>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.25 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1.25, flexWrap: "wrap" }}>
               <Box>
                 <Typography sx={{ fontWeight: 600, fontSize: "0.9rem", color: "#1e293b" }}>
                   Regimen Library
@@ -407,11 +314,11 @@ export default function DashboardPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 size="small"
-                sx={{ width: 220 }}
+                sx={{ width: { xs: "100%", sm: 220 } }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box>
+                      <SearchRoundedIcon sx={{ fontSize: "1rem", color: "#94a3b8" }} />
                     </InputAdornment>
                   ),
                 }}

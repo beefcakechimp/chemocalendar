@@ -7,6 +7,12 @@ import { Regimen, Chemo, TherapyOption } from "@/lib/types";
 import { sortRegimenMeta, SortBy } from "@/lib/utils";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, InputAdornment, InputLabel, List, ListItemButton, MenuItem, Select, Stack, Switch, TextField, Typography, CircularProgress, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import Link from "next/link";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
+import KeyboardArrowUpRoundedIcon from "@mui/icons-material/KeyboardArrowUpRounded";
+import KeyboardArrowDownRoundedIcon from "@mui/icons-material/KeyboardArrowDownRounded";
 
 const ROUTES = ["IV", "PO", "SQ", "IM", "IT"];
 const ROUTE_COLORS: Record<string, { bg: string; color: string }> = {
@@ -70,10 +76,10 @@ function TherapyDialog({ open, initial, onSave, onClose }: { open: boolean; init
                 <Stack direction="row" spacing={1} key={i}>
                   <TextField size="small" label="Dose *" value={opt.dose} onChange={(e) => updateOpt(i, "dose", e.target.value)} sx={{ flex: 1 }} />
                   <TextField size="small" label="Days *" value={opt.duration} onChange={(e) => updateOpt(i, "duration", e.target.value)} sx={{ flex: 1 }} />
-                  {options.length > 1 && <Button color="error" variant="outlined" onClick={() => remOption(i)} sx={{ minWidth: 40, px: 1 }}>✕</Button>}
+                  {options.length > 1 && <Button color="error" variant="outlined" onClick={() => remOption(i)} sx={{ minWidth: 40, px: 1 }}><CloseRoundedIcon sx={{ fontSize: "1rem" }} /></Button>}
                 </Stack>
               ))}
-              <Button size="small" variant="outlined" onClick={addOption} sx={{ alignSelf: "flex-start" }}>+ Add alternative dose</Button>
+              <Button size="small" variant="outlined" onClick={addOption} startIcon={<AddRoundedIcon sx={{ fontSize: "1rem !important" }} />} sx={{ alignSelf: "flex-start" }}>Add alternative dose</Button>
             </Stack>
           </Box>
         </Stack>
@@ -172,7 +178,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {!isNew && <Button size="small" color="error" variant="outlined" onClick={() => setConfirmDelete(true)} sx={{ fontSize: "0.78rem" }}>Delete</Button>}
-              {!isNew && <Button size="small" variant="outlined" component={Link} href={`/calendar?regimen=${encodeURIComponent(initial.name)}`} sx={{ fontSize: "0.78rem", whiteSpace: "nowrap" }}>Open in calendar →</Button>}
+              {!isNew && <Button size="small" variant="outlined" component={Link} href={`/calendar?regimen=${encodeURIComponent(initial.name)}`} endIcon={<ArrowForwardRoundedIcon sx={{ fontSize: "0.85rem !important" }} />} sx={{ fontSize: "0.78rem", whiteSpace: "nowrap" }}>Open in calendar</Button>}
               <Button size="small" variant="contained" onClick={handleSave} disabled={saving || !dirty} sx={{ fontSize: "0.78rem" }}>{saving ? "Saving…" : "Save"}</Button>
             </Stack>
           </Box>
@@ -206,7 +212,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
                 <Typography sx={{ fontWeight: 700, fontSize: "0.875rem", color: "#1e293b" }}>Agents ({reg.therapies.length})</Typography>
                 <Typography sx={{ fontSize: "0.72rem", color: "#64748b" }}>Order sets calendar label stacking</Typography>
               </Box>
-              <Button size="small" variant="outlined" onClick={() => setTherapyDialog({ open: true, index: null, initial: EMPTY_THERAPY })} sx={{ fontSize: "0.78rem" }}>+ Add agent</Button>
+              <Button size="small" variant="outlined" onClick={() => setTherapyDialog({ open: true, index: null, initial: EMPTY_THERAPY })} startIcon={<AddRoundedIcon sx={{ fontSize: "0.9rem !important" }} />} sx={{ fontSize: "0.78rem" }}>Add agent</Button>
             </Box>
 
             {reg.therapies.length === 0 && (
@@ -223,8 +229,8 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
                   <Box key={i} sx={{ p: 1.5, border: "1px solid #e2e8f0", borderRadius: "6px", background: "#fafafa", display: "flex", gap: 1.5, alignItems: "flex-start" }}>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, pt: 0.25 }}>
                       {([-1, 1] as const).map((dir) => (
-                        <Box key={dir} component="button" onClick={() => moveTherapy(i, dir)} disabled={(dir === -1 && i === 0) || (dir === 1 && i === reg.therapies.length - 1)} sx={{ border: "1px solid #e2e8f0", borderRadius: "3px", background: "#fff", cursor: "pointer", fontSize: "0.65rem", px: 0.5, py: 0.15, lineHeight: 1, color: "#475569", "&:disabled": { opacity: 0.25, cursor: "default" } }}>
-                          {dir === -1 ? "▲" : "▼"}
+                        <Box key={dir} component="button" onClick={() => moveTherapy(i, dir)} disabled={(dir === -1 && i === 0) || (dir === 1 && i === reg.therapies.length - 1)} sx={{ border: "1px solid #e2e8f0", borderRadius: "3px", background: "#fff", cursor: "pointer", px: 0.25, py: 0, lineHeight: 0, color: "#475569", display: "flex", alignItems: "center", "&:disabled": { opacity: 0.25, cursor: "default" } }}>
+                          {dir === -1 ? <KeyboardArrowUpRoundedIcon sx={{ fontSize: "0.9rem" }} /> : <KeyboardArrowDownRoundedIcon sx={{ fontSize: "0.9rem" }} />}
                         </Box>
                       ))}
                     </Box>
@@ -243,7 +249,7 @@ function RegimenEditor({ initial, onSaved, onDeleted, isNew }: { initial: Regime
                     </Box>
                     <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
                       <Button size="small" variant="outlined" onClick={() => setTherapyDialog({ open: true, index: i, initial: t })} sx={{ fontSize: "0.72rem", minWidth: 0, px: 1 }}>Edit</Button>
-                      <Button size="small" color="error" variant="outlined" onClick={() => setConfirmTherapyDel(i)} sx={{ fontSize: "0.72rem", minWidth: 0, px: 1 }}>✕</Button>
+                      <Button size="small" color="error" variant="outlined" onClick={() => setConfirmTherapyDel(i)} sx={{ minWidth: 0, px: 1 }}><CloseRoundedIcon sx={{ fontSize: "0.9rem" }} /></Button>
                     </Stack>
                   </Box>
                 );
@@ -295,10 +301,10 @@ export default function RegimensPage() {
         <Card variant="outlined" sx={{ width: { xs: "100%", md: 280 }, flexShrink: 0 }}>
           <CardContent sx={{ p: 0, "&:last-child": { pb: 0 } }}>
             <Box sx={{ px: 1.5, pt: 1.5, pb: 1 }}>
-              <TextField fullWidth size="small" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><Box component="span" sx={{ fontSize: "0.8rem", color: "#94a3b8" }}>⌕</Box></InputAdornment> }} />
+              <TextField fullWidth size="small" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchRoundedIcon sx={{ fontSize: "1rem", color: "#94a3b8" }} /></InputAdornment> }} />
             </Box>
             <Box sx={{ px: 1.5, pb: 0.75 }}>
-              <Button fullWidth size="small" variant={selected === "__new__" ? "contained" : "outlined"} onClick={() => setSelected("__new__")} sx={{ justifyContent: "flex-start", fontSize: "0.8rem", py: 0.75 }}>+ New regimen</Button>
+              <Button fullWidth size="small" variant={selected === "__new__" ? "contained" : "outlined"} onClick={() => setSelected("__new__")} startIcon={<AddRoundedIcon sx={{ fontSize: "0.9rem !important" }} />} sx={{ justifyContent: "flex-start", fontSize: "0.8rem", py: 0.75 }}>New regimen</Button>
             </Box>
             <Box sx={{ px: 1.5, pb: 1 }}>
               <ToggleButtonGroup

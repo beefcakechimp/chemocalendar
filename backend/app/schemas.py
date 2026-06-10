@@ -56,6 +56,11 @@ class CalendarCell(BaseModel):
     cycle_day: Optional[int] = None
     labels: List[str] = Field(default_factory=list)
 
+class CalendarInstruction(BaseModel):
+    name: str
+    route: str
+    text: str
+
 class CalendarPreviewResponse(BaseModel):
     header: str
     label: str
@@ -63,3 +68,4 @@ class CalendarPreviewResponse(BaseModel):
     first_sun: str
     last_sat: str
     grid: List[List[CalendarCell]]
+    instructions: List[CalendarInstruction] = Field(default_factory=list)

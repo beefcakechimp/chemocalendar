@@ -37,6 +37,12 @@ export interface CalendarCell {
   labels: string[];
 }
 
+export interface CalendarInstruction {
+  name: string;
+  route: string;
+  text: string;
+}
+
 export interface CalendarPreviewResponse {
   header: string;
   label: string;
@@ -44,6 +50,7 @@ export interface CalendarPreviewResponse {
   first_sun: string;
   last_sat: string;
   grid: CalendarCell[][];
+  instructions?: CalendarInstruction[];
 }
 
 export interface CalendarPreviewRequest {

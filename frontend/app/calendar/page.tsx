@@ -9,8 +9,23 @@ import { Regimen, CalendarPreviewResponse, Chemo } from "@/lib/types";
 import { sortRegimenMeta } from "@/lib/utils";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Divider, FormControl,
-  InputLabel, MenuItem, Select, Stack, TextField, Tooltip, Typography, RadioGroup, FormControlLabel, Radio
+  InputLabel, MenuItem, Select, Snackbar, Stack, TextField, Tooltip, Typography, RadioGroup, FormControlLabel, Radio
 } from "@mui/material";
+import AutorenewRoundedIcon from "@mui/icons-material/AutorenewRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
+
+// Stable chip palette so each drug keeps a consistent color across the grid.
+const DRUG_COLORS = [
+  { bg: "#dbeafe", fg: "#1d4ed8" }, // blue
+  { bg: "#ede9fe", fg: "#6d28d9" }, // violet
+  { bg: "#ffedd5", fg: "#c2410c" }, // orange
+  { bg: "#fce7f3", fg: "#be185d" }, // pink
+  { bg: "#ccfbf1", fg: "#0f766e" }, // teal
+  { bg: "#fef9c3", fg: "#a16207" }, // yellow
+  { bg: "#fee2e2", fg: "#b91c1c" }, // red
+  { bg: "#e0e7ff", fg: "#4338ca" }, // indigo
+];
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob);
@@ -83,6 +98,7 @@ function CalendarPageInner() {
   const [busy, setBusy] = React.useState(false);
   const [exportBusy, setExportBusy] = React.useState(false);
   const [err, setErr] = React.useState<string>("");
+  const [exported, setExported] = React.useState(false);
 
   const buildRequest = (therapiesParam?: Chemo[]) => ({
     regimen_name: regimenName,
@@ -109,6 +125,7 @@ function CalendarPageInner() {
     try {
       const { blob, filename } = await exportCalendarDocx(buildRequest());
       downloadBlob(blob, filename);
+      setExported(true);
     } catch (e: any) { setErr(e?.message || "Export failed"); }
     finally { setExportBusy(false); }
   }
@@ -121,6 +138,17 @@ function CalendarPageInner() {
       </Box>
 
       {err && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErr("")}>{err}</Alert>}
+
+      <Snackbar
+        open={exported}
+        autoHideDuration={4000}
+        onClose={() => setExported(false)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity="success" variant="filled" onClose={() => setExported(false)} sx={{ fontSize: "0.85rem" }}>
+          Calendar exported — check your downloads
+        </Alert>
+      </Snackbar>
 
       <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems="flex-start">
         <Box sx={{ width: { xs: "100%", lg: 320 }, flexShrink: 0 }}>
@@ -203,10 +231,10 @@ function CalendarPageInner() {
 
               <Divider sx={{ my: 2 }} />
               <Stack spacing={1}>
-                <Button variant="contained" fullWidth onClick={() => runPreview()} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} sx={{ py: 1 }}>
+                <Button variant="contained" fullWidth onClick={() => runPreview()} disabled={busy || !regimenName} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : <AutorenewRoundedIcon sx={{ fontSize: "1rem !important" }} />} sx={{ py: 1 }}>
                   {busy ? "Generating…" : "Generate Preview"}
                 </Button>
-                <Button variant="outlined" fullWidth onClick={runExport} disabled={exportBusy || !regimenName} startIcon={exportBusy ? <CircularProgress size={14} /> : null} sx={{ py: 1 }}>
+                <Button variant="outlined" fullWidth onClick={runExport} disabled={exportBusy || !regimenName} startIcon={exportBusy ? <CircularProgress size={14} /> : <DownloadRoundedIcon sx={{ fontSize: "1rem !important" }} />} sx={{ py: 1 }}>
                   {exportBusy ? "Exporting…" : "Export DOCX"}
                 </Button>
               </Stack>
@@ -230,13 +258,13 @@ function CalendarPageInner() {
                     </>
                   ) : <Typography sx={{ fontWeight: 600, color: "#1e293b" }}>Preview</Typography>}
                 </Box>
-                {preview && <Button size="small" variant="outlined" onClick={runExport} disabled={exportBusy} sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>Export DOCX</Button>}
+                {preview && <Button size="small" variant="outlined" onClick={runExport} disabled={exportBusy} startIcon={<DownloadRoundedIcon sx={{ fontSize: "0.9rem !important" }} />} sx={{ whiteSpace: "nowrap", flexShrink: 0 }}>Export DOCX</Button>}
               </Box>
 
               <Box sx={{ p: 2, overflowX: "auto" }}>
                 {!preview && !busy && (
                   <Box sx={{ textAlign: "center", py: 8 }}>
-                    <Box sx={{ fontSize: "2.5rem", mb: 1.5, opacity: 0.2 }}>◫</Box>
+                    <CalendarMonthRoundedIcon sx={{ fontSize: "2.5rem", mb: 1.5, opacity: 0.2, color: "#0f4c81" }} />
                     <Typography sx={{ color: "#94a3b8", fontSize: "0.9rem" }}>{regimenName ? "Loading calendar…" : "Select a regimen to begin"}</Typography>
                   </Box>
                 )}
@@ -249,6 +277,29 @@ function CalendarPageInner() {
                 {preview && !busy && <CalendarGrid grid={preview.grid} />}
               </Box>
 
+              {preview && !busy && preview.instructions && preview.instructions.length > 0 && (
+                <Box sx={{ px: 2.5, pb: 2 }}>
+                  <Divider sx={{ mb: 1.5 }} />
+                  <Typography sx={{ fontSize: "0.68rem", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", mb: 1 }}>
+                    Medication Instructions
+                  </Typography>
+                  <Stack spacing={0.75}>
+                    {preview.instructions.map((ins) => (
+                      <Box key={ins.name} sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+                        <Box sx={{ width: 5, height: 5, borderRadius: "50%", background: "#94a3b8", mt: 0.8, flexShrink: 0 }} />
+                        <Typography sx={{ fontSize: "0.82rem", color: "#475569", lineHeight: 1.5 }}>
+                          <Box component="span" sx={{ fontWeight: 700, color: "#1e293b" }}>{ins.name}:</Box>{" "}
+                          {ins.text}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                  <Typography sx={{ fontSize: "0.72rem", color: "#94a3b8", mt: 1 }}>
+                    These instructions print at the bottom of the exported calendar.
+                  </Typography>
+                </Box>
+              )}
+
               {preview && (
                 <Box sx={{ px: 2.5, pb: 2, pt: 0 }}>
                   <Divider sx={{ mb: 1.5 }} />
@@ -256,6 +307,10 @@ function CalendarPageInner() {
                     <LegendItem color="#eff6ff" border="#bfdbfe" text="Treatment day" />
                     <LegendItem color="#f0fdf4" border="#bbf7d0" text="Rest day" />
                     <LegendItem color="#f8fafc" border="#e2e8f0" text="Outside cycle" />
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                      <Box sx={{ width: 14, height: 14, borderRadius: "3px", background: "#fff", boxShadow: "inset 0 0 0 2px #1a6bb5" }} />
+                      <Typography sx={{ fontSize: "0.72rem", color: "#64748b" }}>Today</Typography>
+                    </Box>
                   </Box>
                 </Box>
               )}
@@ -278,6 +333,21 @@ function LegendItem({ color, border, text }: { color: string; border: string; te
 
 function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const todayStr = dayjs().format("YYYY-MM-DD");
+
+  // Assign each drug a stable color, in order of first appearance.
+  const drugColor = React.useMemo(() => {
+    const map = new Map<string, { bg: string; fg: string }>();
+    for (const week of grid) {
+      for (const cell of week) {
+        for (const lab of cell.labels || []) {
+          if (lab.toLowerCase() === "rest" || map.has(lab)) continue;
+          map.set(lab, DRUG_COLORS[map.size % DRUG_COLORS.length]);
+        }
+      }
+    }
+    return map;
+  }, [grid]);
 
   return (
     <Box sx={{ overflowX: "auto" }}>
@@ -298,18 +368,20 @@ function CalendarGrid({ grid }: { grid: CalendarPreviewResponse["grid"] }) {
                 const isRest = hasLabels && cell.labels.every((l) => l.toLowerCase() === "rest");
                 const isTreatment = isActive && hasLabels && !isRest;
                 const isLast = wi === grid.length - 1;
+                const isToday = cell.date === todayStr;
                 return (
-                  <Box component="td" key={ci} sx={{ verticalAlign: "top", minWidth: 80, height: 100, p: 0.75, background: isTreatment ? "#eff6ff" : isRest ? "#f0fdf4" : isActive ? "#fafafa" : "#fff", borderRight: ci < 6 ? "1px solid #e2e8f0" : "none", borderBottom: !isLast ? "1px solid #e2e8f0" : "none", transition: "background 0.1s" }}>
-                    <Typography sx={{ textAlign: "right", fontWeight: 700, fontSize: "0.8rem", color: isActive ? "#0f172a" : "#cbd5e1", lineHeight: 1, mb: 0.5 }}>{dayjs(cell.date).format("MMM D")}</Typography>
+                  <Box component="td" key={ci} sx={{ verticalAlign: "top", minWidth: 80, height: 100, p: 0.75, background: isTreatment ? "#eff6ff" : isRest ? "#f0fdf4" : isActive ? "#fafafa" : "#fff", borderRight: ci < 6 ? "1px solid #e2e8f0" : "none", borderBottom: !isLast ? "1px solid #e2e8f0" : "none", boxShadow: isToday ? "inset 0 0 0 2px #1a6bb5" : "none", transition: "background 0.1s" }}>
+                    <Typography sx={{ textAlign: "right", fontWeight: 700, fontSize: "0.8rem", color: isToday ? "#1a6bb5" : isActive ? "#0f172a" : "#cbd5e1", lineHeight: 1, mb: 0.5 }}>{dayjs(cell.date).format("MMM D")}</Typography>
                     {isActive && (
                       <>
                         <Typography sx={{ fontSize: "0.68rem", color: "#94a3b8", fontStyle: "italic", lineHeight: 1, mb: 0.5 }}>Day {cell.cycle_day}</Typography>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 0.3 }}>
                           {(cell.labels || []).map((lab, idx) => {
                             const rest = lab.toLowerCase() === "rest";
+                            const colors = rest ? { bg: "#dcfce7", fg: "#15803d" } : drugColor.get(lab) ?? DRUG_COLORS[0];
                             return (
-                              <Box key={idx} sx={{ px: 0.5, py: 0.2, borderRadius: "3px", background: rest ? "#dcfce7" : "#dbeafe", display: "inline-flex" }}>
-                                <Typography sx={{ fontSize: "0.68rem", fontWeight: rest ? 500 : 700, color: rest ? "#15803d" : "#1d4ed8", lineHeight: 1.3 }}>{lab}</Typography>
+                              <Box key={idx} sx={{ px: 0.5, py: 0.2, borderRadius: "3px", background: colors.bg, display: "inline-flex" }}>
+                                <Typography sx={{ fontSize: "0.68rem", fontWeight: rest ? 500 : 700, color: colors.fg, lineHeight: 1.3 }}>{lab}</Typography>
                               </Box>
                             );
                           })}
