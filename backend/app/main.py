@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .regimenbank import Chemotherapy, Regimen, TherapyOption, build_instruction_text, export_calendar_docx
+from .regimenbank import Chemotherapy, Regimen, TherapyOption, build_instruction_parts, export_calendar_docx
 from .pg_bank import (PgBank, close_bank, get_bank, validate_db)
 from .schemas import CalendarInstruction, CalendarPreviewRequest, CalendarPreviewResponse, RegimenIn, RenameRegimenRequest, RegimenMeta
 from .calendar_service import build_preview
@@ -133,7 +133,10 @@ def calendar_preview(req: CalendarPreviewRequest, bank: PgBank = Depends(get_ban
     except Exception: raise HTTPException(status_code=400, detail="start_date must be YYYY-MM-DD")
     
     header, label, reg_for_preview, first_sun, last_sat, grid = build_preview(reg=reg, start=start, cycle_len=max(1, req.cycle_len), phase=req.phase, cycle_num=req.cycle_num, title_override=req.title_override)
-    instructions = [CalendarInstruction(name=t.name, route=t.route, text=build_instruction_text(t)) for t in reg.therapies]
+    instructions = []
+    for t in reg.therapies:
+        sentence, hospital = build_instruction_parts(t)
+        instructions.append(CalendarInstruction(name=t.name, route=t.route, text=sentence, hospital=hospital))
     return CalendarPreviewResponse(header=header, label=label, regimen_title=reg_for_preview.name, first_sun=first_sun.isoformat(), last_sat=last_sat.isoformat(), grid=grid, instructions=instructions)
 
 @app.post("/calendar/export")

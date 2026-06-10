@@ -290,6 +290,9 @@ function CalendarPageInner() {
                         <Typography sx={{ fontSize: "0.82rem", color: "#475569", lineHeight: 1.5 }}>
                           <Box component="span" sx={{ fontWeight: 700, color: "#1e293b" }}>{ins.name}:</Box>{" "}
                           {ins.text}
+                          {ins.hospital && (
+                            <Box component="span" sx={{ fontStyle: "italic" }}> Given in the hospital.</Box>
+                          )}
                         </Typography>
                       </Box>
                     ))}
